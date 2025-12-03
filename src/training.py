@@ -1,107 +1,187 @@
 """
-Training and evaluation functions.
+Training Utilities for Neural Network Models.
+
+Provides training loop, early stopping, and evaluation functions
+with support for model-specific learning rates.
 """
 
 import torch
 import torch.nn as nn
-from torch.optim import Adam
-from torch.utils.data import DataLoader
+import torch.optim as optim
+import numpy as np
 
 from config import config
 
 
 class EarlyStopping:
-    """Stop training when validation loss stops improving."""
+    """
+    Monitors validation loss to prevent overfitting.
 
-    def __init__(self, patience: int = 10, min_delta: float = 0.001):
+    Restores best model weights when training is stopped early
+    to ensure the returned model is the best performing one.
+    """
+
+    def __init__(self, patience: int = None, min_delta: float = None):
+        if patience is None:
+            patience = config["early_stopping_patience"]
+        if min_delta is None:
+            min_delta = config["early_stopping_min_delta"]
+
         self.patience = patience
         self.min_delta = min_delta
         self.counter = 0
-        self.best_loss = float("inf")
+        self.best_loss = None
+        self.early_stop = False
+        self.best_model_state = None
 
-    def __call__(self, val_loss: float) -> bool:
+    def __call__(self, val_loss: float, model: nn.Module) -> bool:
+        if self.best_loss is None:
+            self.best_loss = val_loss
+            self.best_model_state = model.state_dict().copy()
+            return False
+
         if val_loss < self.best_loss - self.min_delta:
             self.best_loss = val_loss
             self.counter = 0
-            return False
-        self.counter += 1
-        return self.counter >= self.patience
+            self.best_model_state = model.state_dict().copy()
+        else:
+            self.counter += 1
+            if self.counter >= self.patience:
+                self.early_stop = True
+
+        return self.early_stop
+
+    def restore_best_weights(self, model: nn.Module):
+        """Load the best model weights observed during training."""
+        if self.best_model_state is not None:
+            model.load_state_dict(self.best_model_state)
 
 
-def train_epoch(model: nn.Module, loader: DataLoader, criterion: nn.Module,
-                optimizer: torch.optim.Optimizer, device: str) -> tuple:
-    """Train for one epoch."""
+def train_epoch(
+    model: nn.Module,
+    train_loader,
+    criterion: nn.Module,
+    optimizer: optim.Optimizer,
+    device: str
+) -> tuple:
+    """
+    Execute one training epoch.
+
+    Returns:
+        Tuple of (average_loss, accuracy)
+    """
     model.train()
-    total_loss, correct, total = 0.0, 0, 0
+    total_loss = 0.0
+    correct = 0
+    total = 0
 
-    for X, y in loader:
-        X, y = X.to(device), y.to(device)
+    for inputs, labels in train_loader:
+        inputs, labels = inputs.to(device), labels.to(device)
 
         optimizer.zero_grad()
-        out = model(X)
-        loss = criterion(out, y)
+        outputs = model(inputs)
+        loss = criterion(outputs, labels)
         loss.backward()
+
+        # Gradient clipping prevents exploding gradients in LSTM
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
         optimizer.step()
 
-        total_loss += loss.item() * len(y)
-        correct += (out.argmax(1) == y).sum().item()
-        total += len(y)
+        total_loss += loss.item() * inputs.size(0)
+        _, predicted = outputs.max(1)
+        total += labels.size(0)
+        correct += predicted.eq(labels).sum().item()
 
-    return total_loss / total, correct / total
+    avg_loss = total_loss / total
+    accuracy = correct / total
+
+    return avg_loss, accuracy
 
 
-@torch.no_grad()
-def evaluate(model: nn.Module, loader: DataLoader, criterion: nn.Module,
-             device: str) -> tuple:
-    """Evaluate model on a dataset."""
+def evaluate(
+    model: nn.Module,
+    data_loader,
+    criterion: nn.Module,
+    device: str
+) -> tuple:
+    """
+    Evaluate model on a dataset.
+
+    Returns:
+        Tuple of (average_loss, accuracy)
+    """
     model.eval()
-    total_loss, correct, total = 0.0, 0, 0
+    total_loss = 0.0
+    correct = 0
+    total = 0
 
-    for X, y in loader:
-        X, y = X.to(device), y.to(device)
-        out = model(X)
-        loss = criterion(out, y)
+    with torch.no_grad():
+        for inputs, labels in data_loader:
+            inputs, labels = inputs.to(device), labels.to(device)
 
-        total_loss += loss.item() * len(y)
-        correct += (out.argmax(1) == y).sum().item()
-        total += len(y)
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
 
-    return total_loss / total, correct / total
+            total_loss += loss.item() * inputs.size(0)
+            _, predicted = outputs.max(1)
+            total += labels.size(0)
+            correct += predicted.eq(labels).sum().item()
+
+    avg_loss = total_loss / total
+    accuracy = correct / total
+
+    return avg_loss, accuracy
 
 
-def train_model(model: nn.Module, train_loader: DataLoader, val_loader: DataLoader,
-                epochs: int = None, device: str = None, model_name: str = None) -> dict:
-    """Full training loop with early stopping."""
+def train_model(
+    model: nn.Module,
+    train_loader,
+    val_loader,
+    epochs: int = None,
+    model_name: str = None,
+    verbose: bool = True
+) -> dict:
+    """
+    Train a model with early stopping and model-specific learning rate.
+
+    Args:
+        model: Neural network to train
+        train_loader: DataLoader for training data
+        val_loader: DataLoader for validation data
+        epochs: Maximum number of training epochs
+        model_name: Model identifier for learning rate lookup
+        verbose: Whether to print progress
+
+    Returns:
+        Dictionary containing training history and best validation accuracy
+    """
     if epochs is None:
         epochs = config["epochs"]
-    if device is None:
-        device = config["device"]
 
+    device = config["device"]
     model = model.to(device)
+
+    # Use model-specific learning rate if available
+    lr = config["learning_rates"].get(model_name, 1e-3)
+
     criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+    early_stopping = EarlyStopping()
 
-    # Get learning rate (per-model or default)
-    if model_name and isinstance(config["lr"], dict):
-        lr = config["lr"].get(model_name, 1e-3)
-    elif isinstance(config["lr"], dict):
-        lr = 1e-3  # default
-    else:
-        lr = config["lr"]
+    history = {
+        "train_loss": [],
+        "train_acc": [],
+        "val_loss": [],
+        "val_acc": [],
+    }
 
-    optimizer = Adam(model.parameters(), lr=lr, weight_decay=config["weight_decay"])
-
-    early_stopping = None
-    if config["early_stopping"]["enabled"]:
-        early_stopping = EarlyStopping(
-            patience=config["early_stopping"]["patience"],
-            min_delta=config["early_stopping"]["min_delta"],
-        )
-
-    history = {"train_loss": [], "train_acc": [], "val_loss": [], "val_acc": []}
     best_val_acc = 0.0
 
-    for epoch in range(1, epochs + 1):
-        train_loss, train_acc = train_epoch(model, train_loader, criterion, optimizer, device)
+    for epoch in range(epochs):
+        train_loss, train_acc = train_epoch(
+            model, train_loader, criterion, optimizer, device
+        )
         val_loss, val_acc = evaluate(model, val_loader, criterion, device)
 
         history["train_loss"].append(train_loss)
@@ -112,24 +192,45 @@ def train_model(model: nn.Module, train_loader: DataLoader, val_loader: DataLoad
         if val_acc > best_val_acc:
             best_val_acc = val_acc
 
-        print(f"Epoch {epoch:3d}/{epochs} | "
-              f"Train: {train_acc:.4f} | Val: {val_acc:.4f}")
+        if verbose:
+            print(f"Epoch {epoch + 1:3d}/{epochs} | "
+                  f"Train: {train_acc:.4f} | Val: {val_acc:.4f}")
 
-        if early_stopping and early_stopping(val_loss):
-            print(f"Early stopping at epoch {epoch}")
+        if early_stopping(val_loss, model):
+            if verbose:
+                print(f"Early stopping at epoch {epoch + 1}")
             break
 
-    return {"history": history, "best_val_acc": best_val_acc}
+    early_stopping.restore_best_weights(model)
+
+    return {
+        "history": history,
+        "best_val_acc": best_val_acc,
+        "epochs_trained": len(history["train_loss"]),
+    }
 
 
-if __name__ == "__main__":
-    from data import load_data, create_dataloaders
-    from models import get_model
+def get_predictions(model: nn.Module, data_loader, device: str = None) -> tuple:
+    """
+    Get model predictions and true labels for a dataset.
 
-    data = load_data(strategy="random")
-    train_loader, val_loader, _ = create_dataloaders(data, config["batch_size"])
+    Returns:
+        Tuple of (predictions array, labels array)
+    """
+    if device is None:
+        device = config["device"]
 
-    model = get_model("cnn1d")
-    result = train_model(model, train_loader, val_loader, epochs=5, model_name="cnn1d")
+    model.eval()
+    all_preds = []
+    all_labels = []
 
-    print(f"\nBest val accuracy: {result['best_val_acc']:.4f}")
+    with torch.no_grad():
+        for inputs, labels in data_loader:
+            inputs = inputs.to(device)
+            outputs = model(inputs)
+            _, predicted = outputs.max(1)
+
+            all_preds.extend(predicted.cpu().numpy())
+            all_labels.extend(labels.numpy())
+
+    return np.array(all_preds), np.array(all_labels)

@@ -1,5 +1,8 @@
 """
-Deep learning models for bearing fault diagnosis.
+Neural Network Architectures for Time-Series Classification.
+
+Implements three architectures commonly used for vibration-based
+fault diagnosis: CNN, LSTM, and a hybrid CNN-LSTM model.
 """
 
 import torch
@@ -9,134 +12,205 @@ from config import config
 
 
 class CNN1D(nn.Module):
-    """1D CNN for raw vibration signals."""
+    """
+    1D Convolutional Neural Network for vibration signal classification.
 
-    def __init__(self, num_classes: int = 10, dropout: float = 0.3):
+    Architecture uses progressively increasing filter counts to capture
+    hierarchical features from local patterns to global structure.
+    Adaptive pooling enables variable input lengths.
+    """
+
+    def __init__(self, num_classes: int = None):
         super().__init__()
+
+        if num_classes is None:
+            num_classes = config["num_classes"]
+
         self.features = nn.Sequential(
-            nn.Conv1d(1, 32, kernel_size=64, stride=8, padding=28),
+            # First block captures local high-frequency patterns
+            nn.Conv1d(1, 32, kernel_size=7, padding=3),
             nn.BatchNorm1d(32),
             nn.ReLU(),
             nn.MaxPool1d(2),
+            nn.Dropout(0.2),
 
-            nn.Conv1d(32, 64, kernel_size=32, stride=4, padding=14),
+            # Second block captures mid-level features
+            nn.Conv1d(32, 64, kernel_size=5, padding=2),
             nn.BatchNorm1d(64),
             nn.ReLU(),
             nn.MaxPool1d(2),
+            nn.Dropout(0.2),
 
-            nn.Conv1d(64, 128, kernel_size=16, stride=2, padding=7),
+            # Third block captures abstract patterns
+            nn.Conv1d(64, 128, kernel_size=3, padding=1),
             nn.BatchNorm1d(128),
             nn.ReLU(),
             nn.AdaptiveAvgPool1d(1),
         )
+
         self.classifier = nn.Sequential(
             nn.Flatten(),
             nn.Linear(128, 64),
             nn.ReLU(),
-            nn.Dropout(dropout),
+            nn.Dropout(0.5),
             nn.Linear(64, num_classes),
         )
 
     def forward(self, x):
-        return self.classifier(self.features(x))
+        x = self.features(x)
+        x = self.classifier(x)
+        return x
 
 
-class LSTM(nn.Module):
-    """LSTM with convolutional downsampling for raw vibration signals."""
+class LSTMClassifier(nn.Module):
+    """
+    Bidirectional LSTM for capturing temporal dependencies in signals.
 
-    def __init__(self, num_classes: int = 10, hidden_size: int = 128,
-                 num_layers: int = 2, dropout: float = 0.3):
+    Initial convolution reduces sequence length to make LSTM training
+    feasible. Bidirectional processing captures both past and future
+    context at each timestep.
+    """
+
+    def __init__(self, num_classes: int = None, hidden_size: int = 128):
         super().__init__()
-        # Downsample: 2048 -> ~128 timesteps
-        self.downsample = nn.Sequential(
-            nn.Conv1d(1, 32, kernel_size=64, stride=16, padding=24),
-            nn.BatchNorm1d(32),
+
+        if num_classes is None:
+            num_classes = config["num_classes"]
+
+        # Downsample sequence to reduce LSTM computational cost
+        self.conv_downsample = nn.Sequential(
+            nn.Conv1d(1, 64, kernel_size=7, stride=4, padding=3),
+            nn.BatchNorm1d(64),
+            nn.ReLU(),
+            nn.Conv1d(64, 64, kernel_size=5, stride=4, padding=2),
+            nn.BatchNorm1d(64),
             nn.ReLU(),
         )
-        
+
         self.lstm = nn.LSTM(
-            input_size=32,
+            input_size=64,
             hidden_size=hidden_size,
-            num_layers=num_layers,
+            num_layers=2,
             batch_first=True,
-            dropout=dropout if num_layers > 1 else 0,
             bidirectional=True,
+            dropout=0.3,
         )
+
+        # Bidirectional doubles the hidden size
         self.classifier = nn.Sequential(
             nn.Linear(hidden_size * 2, 64),
             nn.ReLU(),
-            nn.Dropout(dropout),
+            nn.Dropout(0.5),
             nn.Linear(64, num_classes),
         )
 
     def forward(self, x):
-        x = self.downsample(x)  # (batch, 32, ~128)
-        x = x.transpose(1, 2)   # (batch, ~128, 32)
-        _, (h_n, _) = self.lstm(x)
-        h = torch.cat([h_n[-2], h_n[-1]], dim=1)
-        return self.classifier(h)
+        x = self.conv_downsample(x)
+        # Reshape for LSTM: (batch, channels, seq) to (batch, seq, features)
+        x = x.permute(0, 2, 1)
+
+        lstm_out, (hidden, cell) = self.lstm(x)
+
+        # Concatenate final hidden states from both directions
+        hidden_concat = torch.cat((hidden[-2], hidden[-1]), dim=1)
+
+        x = self.classifier(hidden_concat)
+        return x
 
 
 class CNNLSTM(nn.Module):
-    """CNN feature extraction + LSTM temporal modeling."""
+    """
+    Hybrid CNN-LSTM combining local feature extraction with sequence modeling.
 
-    def __init__(self, num_classes: int = 10, hidden_size: int = 64,
-                 num_layers: int = 1, dropout: float = 0.3):
+    CNN layers extract discriminative local features while LSTM captures
+    temporal relationships between feature activations.
+    """
+
+    def __init__(self, num_classes: int = None, hidden_size: int = 64):
         super().__init__()
+
+        if num_classes is None:
+            num_classes = config["num_classes"]
+
+        # CNN feature extractor with aggressive downsampling
         self.cnn = nn.Sequential(
-            nn.Conv1d(1, 32, kernel_size=64, stride=4, padding=30),
+            nn.Conv1d(1, 32, kernel_size=7, stride=2, padding=3),
             nn.BatchNorm1d(32),
             nn.ReLU(),
             nn.MaxPool1d(2),
 
-            nn.Conv1d(32, 64, kernel_size=32, stride=2, padding=15),
+            nn.Conv1d(32, 64, kernel_size=5, stride=2, padding=2),
             nn.BatchNorm1d(64),
             nn.ReLU(),
             nn.MaxPool1d(2),
         )
+
         self.lstm = nn.LSTM(
             input_size=64,
             hidden_size=hidden_size,
-            num_layers=num_layers,
+            num_layers=1,
             batch_first=True,
             bidirectional=True,
+            dropout=0.0,
         )
+
         self.classifier = nn.Sequential(
             nn.Linear(hidden_size * 2, 32),
             nn.ReLU(),
-            nn.Dropout(dropout),
+            nn.Dropout(0.5),
             nn.Linear(32, num_classes),
         )
 
     def forward(self, x):
         x = self.cnn(x)
-        x = x.transpose(1, 2)
-        _, (h_n, _) = self.lstm(x)
-        h = torch.cat([h_n[-2], h_n[-1]], dim=1)
-        return self.classifier(h)
+        x = x.permute(0, 2, 1)
+
+        lstm_out, (hidden, cell) = self.lstm(x)
+        hidden_concat = torch.cat((hidden[-2], hidden[-1]), dim=1)
+
+        x = self.classifier(hidden_concat)
+        return x
 
 
-def get_model(name: str) -> nn.Module:
-    """Factory function to get model by name."""
+def get_model(model_name: str, num_classes: int = None) -> nn.Module:
+    """
+    Factory function to create model instances by name.
+
+    Args:
+        model_name: One of "cnn1d", "lstm", or "cnnlstm"
+        num_classes: Number of output classes (uses config default if None)
+
+    Returns:
+        Initialized model instance
+    """
     models = {
         "cnn1d": CNN1D,
-        "lstm": LSTM,
+        "lstm": LSTMClassifier,
         "cnnlstm": CNNLSTM,
     }
-    if name not in models:
-        raise ValueError(f"Unknown model: {name}. Choose from {list(models.keys())}")
 
-    return models[name](
-        num_classes=config["num_classes"],
-        dropout=config["dropout"],
-    )
+    if model_name not in models:
+        raise ValueError(f"Unknown model: {model_name}. Available: {list(models.keys())}")
+
+    return models[model_name](num_classes=num_classes)
+
+
+def count_parameters(model: nn.Module) -> int:
+    """Return total number of trainable parameters."""
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
 if __name__ == "__main__":
-    batch = torch.randn(4, 1, 2048)
+    print("Model Architecture Summary")
+    print("=" * 50)
 
     for name in ["cnn1d", "lstm", "cnnlstm"]:
         model = get_model(name)
-        out = model(batch)
-        params = sum(p.numel() for p in model.parameters())
-        print(f"{name:8} | output: {out.shape} | params: {params:,}")
+        params = count_parameters(model)
+        print(f"{name.upper()}: {params:,} parameters")
+
+        # Test forward pass
+        x = torch.randn(2, 1, config["window_size"])
+        y = model(x)
+        print(f"  Input: {x.shape} -> Output: {y.shape}")
+        print()
