@@ -3,10 +3,15 @@ CWRU Bearing Dataset Loading and Preprocessing.
 
 Implements multiple data splitting strategies to evaluate model
 generalization under different conditions:
-- Random: baseline with potential data leakage
+- Random: baseline with chunk-based splitting to prevent leakage
 - Fault-size: tests generalization to unseen severity levels
 - Fault-size-all-loads: fault-size split with training diversity from all loads
 - Cross-load: tests generalization to unseen operating conditions
+
+Key design decisions based on literature review:
+- 75% overlap (stride 512 with window 2048) matches common practice
+- Chunk-based splitting prevents segment-level data leakage
+- Normal class included in test set for fault-size experiments
 """
 
 import os
@@ -128,7 +133,6 @@ def split_signal_into_chunks(
     chunks = [signal[i * chunk_size:(i + 1) * chunk_size] for i in range(n_chunks)]
     rng.shuffle(chunks)
 
-    # Allocate chunks based on ratios (6:2:2 for 60:20:20 split)
     n_test = int(n_chunks * test_ratio)
     n_val = int(n_chunks * val_ratio)
 
@@ -147,8 +151,8 @@ def load_data_random_split(data_dir: str) -> dict:
     """
     Load data with random split from a single load.
 
-    This represents the typical approach in literature which can
-    lead to data leakage due to temporal correlation between windows.
+    Uses chunk-based splitting to prevent data leakage from
+    overlapping windows across train/val/test sets.
     """
     signals = load_raw_signals_for_load("1772", data_dir)
     window_size = config["window_size"]
@@ -183,6 +187,8 @@ def load_data_fault_size_split(data_dir: str, use_all_loads: bool = False) -> di
 
     Holds out one fault severity entirely for testing to evaluate
     whether models can generalize to unseen damage levels.
+    Normal class is split between train and test to maintain all 4 classes
+    in both sets, following Rosa et al. methodology.
 
     Args:
         data_dir: Directory containing data files
@@ -209,14 +215,13 @@ def load_data_fault_size_split(data_dir: str, use_all_loads: bool = False) -> di
             fault_size = data["fault_size"]
 
             if fault_size == test_fault_size:
-                # This severity goes entirely to test set
                 windows = extract_windows(signal, window_size, stride)
                 X_test.append(windows)
                 y_test.extend([label] * len(windows))
 
             elif fault_size == "none":
-                # Normal class: split between train, val, AND test
-                # This ensures all 4 classes are present in test set
+                # Normal class split between train, val, and test
+                # Ensures all 4 classes present in test set
                 split = split_signal_into_chunks(
                     signal, val_ratio=0.2, test_ratio=0.2, seed=seed
                 )
@@ -233,7 +238,7 @@ def load_data_fault_size_split(data_dir: str, use_all_loads: bool = False) -> di
                 y_test.extend([label] * len(test_windows))
 
             else:
-                # Other fault severities: split between train and validation only
+                # Other fault severities split between train and validation only
                 split = split_signal_into_chunks(
                     signal, val_ratio=0.2, test_ratio=0.0, seed=seed
                 )
@@ -273,7 +278,6 @@ def load_data_cross_load_split(
     X_val, y_val = [], []
     X_test, y_test = [], []
 
-    # Load training data from specified loads
     for load in train_loads:
         signals = load_raw_signals_for_load(load, data_dir)
 
@@ -290,7 +294,6 @@ def load_data_cross_load_split(
             X_val.append(val_windows)
             y_val.extend([data["label_idx"]] * len(val_windows))
 
-    # Load test data from different loads
     for load in test_loads:
         signals = load_raw_signals_for_load(load, data_dir)
 
@@ -329,7 +332,6 @@ def load_data(
     data_dir: str = "data/raw",
     train_loads: list = None,
     test_loads: list = None,
-    use_all_loads: bool = False
 ) -> dict:
     """
     Main data loading function with configurable split strategy.
@@ -339,7 +341,6 @@ def load_data(
         data_dir: Directory containing data files
         train_loads: For cross_load strategy, which loads to train on
         test_loads: For cross_load strategy, which loads to test on
-        use_all_loads: For fault_size strategy, whether to use all loads
 
     Returns:
         Dictionary containing train, validation, and test data arrays
@@ -349,15 +350,15 @@ def load_data(
 
     if strategy == "random":
         data = load_data_random_split(data_dir)
-        print(f"Mode: {config['classification_mode']}, Split: random")
+        print(f"Strategy: random | Window: {config['window_size']} | Stride: {config['stride']}")
 
     elif strategy == "fault_size":
         data = load_data_fault_size_split(data_dir, use_all_loads=False)
-        print(f"Mode: {config['classification_mode']}, Split: fault_size (test={config['test_fault_size']})")
+        print(f"Strategy: fault_size (test={config['test_fault_size']}) | Single load")
 
     elif strategy == "fault_size_all_loads":
         data = load_data_fault_size_split(data_dir, use_all_loads=True)
-        print(f"Mode: {config['classification_mode']}, Split: fault_size_all_loads (test={config['test_fault_size']})")
+        print(f"Strategy: fault_size_all_loads (test={config['test_fault_size']}) | All loads")
 
     elif strategy == "cross_load":
         if train_loads is None:
@@ -365,14 +366,13 @@ def load_data(
         if test_loads is None:
             test_loads = config["cross_load_test"]
         data = load_data_cross_load_split(train_loads, test_loads, data_dir)
-        print(f"Mode: {config['classification_mode']}, Split: cross_load")
-        print(f"  Train loads: {train_loads}")
-        print(f"  Test loads: {test_loads}")
+        print(f"Strategy: cross_load | Train: {train_loads} | Test: {test_loads}")
 
     else:
         raise ValueError(f"Unknown split strategy: {strategy}")
 
-    print(f"  Train: {len(data['X_train'])}, Val: {len(data['X_val'])}, Test: {len(data['X_test'])}")
+    print(f"Samples - Train: {len(data['X_train'])}, Val: {len(data['X_val'])}, Test: {len(data['X_test'])}")
+    print(f"Train labels: {np.unique(data['y_train'])}, Test labels: {np.unique(data['y_test'])}")
 
     return data
 
@@ -408,16 +408,3 @@ def create_dataloaders(data: dict, batch_size: int = None) -> tuple:
     )
 
     return train_loader, val_loader, test_loader
-
-
-if __name__ == "__main__":
-    # Verification of data loading for each strategy
-    print("=" * 60)
-    print("Data Loading Verification")
-    print("=" * 60)
-
-    for strategy in ["random", "fault_size", "fault_size_all_loads"]:
-        print(f"\n{strategy.upper()}:")
-        data = load_data(strategy=strategy)
-        print(f"  Train labels: {np.unique(data['y_train'])}")
-        print(f"  Test labels: {np.unique(data['y_test'])}")

@@ -15,8 +15,9 @@ config = {
     # Signal processing
     # 2048 samples at 12kHz captures approximately 170ms per window
     "window_size": 2048,
-    # 97% overlap maximizes sample count while capturing transient events
-    "stride": 64,
+    # 512 stride gives 75% overlap, matching literature practices
+    # Papers typically use 50-75% overlap, NOT 97%
+    "stride": 512,
 
     # Classification setup
     # 4class groups severities by fault type for generalization testing
@@ -34,7 +35,7 @@ config = {
     "available_loads": ["1772", "1750", "1730"],
 
     # Split strategy options:
-    # - random: standard split with potential segment-level leakage
+    # - random: standard split with chunk-based leakage prevention
     # - fault_size: hold out one severity for testing (single load)
     # - fault_size_all_loads: hold out one severity using all loads
     # - cross_load: train on one load and test on different loads

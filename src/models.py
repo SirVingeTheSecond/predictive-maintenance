@@ -17,7 +17,6 @@ class CNN1D(nn.Module):
 
     Architecture uses progressively increasing filter counts to capture
     hierarchical features from local patterns to global structure.
-    Adaptive pooling enables variable input lengths.
     """
 
     def __init__(self, num_classes: int = None):
@@ -27,21 +26,18 @@ class CNN1D(nn.Module):
             num_classes = config["num_classes"]
 
         self.features = nn.Sequential(
-            # First block captures local high-frequency patterns
             nn.Conv1d(1, 32, kernel_size=7, padding=3),
             nn.BatchNorm1d(32),
             nn.ReLU(),
             nn.MaxPool1d(2),
             nn.Dropout(0.2),
 
-            # Second block captures mid-level features
             nn.Conv1d(32, 64, kernel_size=5, padding=2),
             nn.BatchNorm1d(64),
             nn.ReLU(),
             nn.MaxPool1d(2),
             nn.Dropout(0.2),
 
-            # Third block captures abstract patterns
             nn.Conv1d(64, 128, kernel_size=3, padding=1),
             nn.BatchNorm1d(128),
             nn.ReLU(),
@@ -67,8 +63,7 @@ class LSTMClassifier(nn.Module):
     Bidirectional LSTM for capturing temporal dependencies in signals.
 
     Initial convolution reduces sequence length to make LSTM training
-    feasible. Bidirectional processing captures both past and future
-    context at each timestep.
+    feasible. Bidirectional processing captures context from both directions.
     """
 
     def __init__(self, num_classes: int = None, hidden_size: int = 128):
@@ -77,7 +72,6 @@ class LSTMClassifier(nn.Module):
         if num_classes is None:
             num_classes = config["num_classes"]
 
-        # Downsample sequence to reduce LSTM computational cost
         self.conv_downsample = nn.Sequential(
             nn.Conv1d(1, 64, kernel_size=7, stride=4, padding=3),
             nn.BatchNorm1d(64),
@@ -96,7 +90,6 @@ class LSTMClassifier(nn.Module):
             dropout=0.3,
         )
 
-        # Bidirectional doubles the hidden size
         self.classifier = nn.Sequential(
             nn.Linear(hidden_size * 2, 64),
             nn.ReLU(),
@@ -106,12 +99,9 @@ class LSTMClassifier(nn.Module):
 
     def forward(self, x):
         x = self.conv_downsample(x)
-        # Reshape for LSTM: (batch, channels, seq) to (batch, seq, features)
         x = x.permute(0, 2, 1)
 
         lstm_out, (hidden, cell) = self.lstm(x)
-
-        # Concatenate final hidden states from both directions
         hidden_concat = torch.cat((hidden[-2], hidden[-1]), dim=1)
 
         x = self.classifier(hidden_concat)
@@ -132,7 +122,6 @@ class CNNLSTM(nn.Module):
         if num_classes is None:
             num_classes = config["num_classes"]
 
-        # CNN feature extractor with aggressive downsampling
         self.cnn = nn.Sequential(
             nn.Conv1d(1, 32, kernel_size=7, stride=2, padding=3),
             nn.BatchNorm1d(32),
@@ -198,19 +187,3 @@ def get_model(model_name: str, num_classes: int = None) -> nn.Module:
 def count_parameters(model: nn.Module) -> int:
     """Return total number of trainable parameters."""
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
-
-
-if __name__ == "__main__":
-    print("Model Architecture Summary")
-    print("=" * 50)
-
-    for name in ["cnn1d", "lstm", "cnnlstm"]:
-        model = get_model(name)
-        params = count_parameters(model)
-        print(f"{name.upper()}: {params:,} parameters")
-
-        # Test forward pass
-        x = torch.randn(2, 1, config["window_size"])
-        y = model(x)
-        print(f"  Input: {x.shape} -> Output: {y.shape}")
-        print()
