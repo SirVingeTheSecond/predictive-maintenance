@@ -11,6 +11,10 @@ Experiments:
 4. Cross-load experiments (tests operating condition generalization)
 """
 
+"""
+Experiment runner comparing feature modes and architectures.
+"""
+
 import json
 import os
 from datetime import datetime
@@ -26,12 +30,7 @@ from training import train_model, get_predictions
 
 
 def evaluate_with_metrics(model, test_loader, device: str = None) -> dict:
-    """
-    Comprehensive model evaluation with per-class metrics.
-
-    Returns:
-        Dictionary containing accuracy, classification report, and confusion matrix
-    """
+    """Comprehensive model evaluation."""
     if device is None:
         device = config["device"]
 
@@ -55,36 +54,35 @@ def evaluate_with_metrics(model, test_loader, device: str = None) -> dict:
         "accuracy": accuracy,
         "report": report,
         "confusion_matrix": conf_matrix.tolist(),
-        "predictions": predictions.tolist(),
-        "labels": labels.tolist(),
     }
 
 
-def run_single_experiment(
-    model_name: str,
-    split_strategy: str,
-    epochs: int = None,
-    train_loads: list = None,
-    test_loads: list = None,
-    data_dir: str = "data/raw"
+def run_experiment(
+        model_name: str,
+        split_strategy: str,
+        feature_mode: str = None,
+        epochs: int = None,
+        train_loads: list = None,
+        test_loads: list = None,
+        data_dir: str = "data/raw"
 ) -> dict:
-    """
-    Run a single experiment with specified configuration.
-    """
+    """Run single experiment."""
     if epochs is None:
         epochs = config["epochs"]
+    if feature_mode is None:
+        feature_mode = config["feature_mode"]
+
+    # Temporarily set feature mode
+    original_mode = config["feature_mode"]
+    config["feature_mode"] = feature_mode
 
     print(f"\n{'=' * 60}")
-    print(f"Model: {model_name.upper()} | Strategy: {split_strategy}")
+    print(f"Model: {model_name.upper()} | Strategy: {split_strategy} | Features: {feature_mode}")
     print(f"{'=' * 60}")
 
     if split_strategy == "cross_load":
-        data = load_data(
-            strategy=split_strategy,
-            data_dir=data_dir,
-            train_loads=train_loads,
-            test_loads=test_loads
-        )
+        data = load_data(strategy=split_strategy, data_dir=data_dir,
+                         train_loads=train_loads, test_loads=test_loads)
     else:
         data = load_data(strategy=split_strategy, data_dir=data_dir)
 
@@ -92,171 +90,104 @@ def run_single_experiment(
 
     model = get_model(model_name).to(config["device"])
     params = count_parameters(model)
+    print(f"Parameters: {params:,}")
 
-    result = train_model(
-        model, train_loader, val_loader,
-        epochs=epochs, model_name=model_name
-    )
-
+    result = train_model(model, train_loader, val_loader, epochs=epochs, model_name=model_name)
     test_metrics = evaluate_with_metrics(model, test_loader)
 
     print(f"\nTest Accuracy: {test_metrics['accuracy']:.4f}")
-    print(f"Per-class recall:")
+    print("Per-class recall:")
     for cls_name in config["class_names"]:
         if cls_name in test_metrics["report"]:
             recall = test_metrics["report"][cls_name]["recall"]
             print(f"  {cls_name}: {recall:.3f}")
 
+    # Restore original feature mode
+    config["feature_mode"] = original_mode
+
     return {
         "model": model_name,
         "split_strategy": split_strategy,
-        "train_loads": train_loads,
-        "test_loads": test_loads,
+        "feature_mode": feature_mode,
         "parameters": params,
         "epochs_trained": result["epochs_trained"],
         "best_val_acc": result["best_val_acc"],
         "test_accuracy": test_metrics["accuracy"],
         "classification_report": test_metrics["report"],
         "confusion_matrix": test_metrics["confusion_matrix"],
-        "history": result["history"],
         "timestamp": datetime.now().isoformat(),
     }
 
 
-def run_comprehensive_study(
-    models: list = None,
-    epochs: int = None,
-    data_dir: str = "data/raw"
-) -> list:
+def run_improvement_study(data_dir: str = "data/raw") -> list:
     """
-    Execute the complete experimental study.
-    """
-    if models is None:
-        models = ["cnn1d", "lstm", "cnnlstm"]
-    if epochs is None:
-        epochs = config["epochs"]
+    Compare improvements on fault-size generalization task.
 
+    Tests:
+    1. Time domain (baseline)
+    2. FFT features
+    3. Time + FFT combined
+    4. Deep CNN with FFT
+    """
     all_results = []
 
     print("=" * 70)
-    print("CWRU Bearing Fault Diagnosis - Comprehensive Study")
+    print("IMPROVEMENT STUDY: Fault-Size Generalization")
     print("=" * 70)
-    print(f"Device: {config['device']}")
-    print(f"Window: {config['window_size']} | Stride: {config['stride']} | Overlap: {100*(1 - config['stride']/config['window_size']):.0f}%")
-    print(f"Epochs: {epochs}")
 
-    # Experiment 1: Random Split Baseline
-    print("\n" + "=" * 70)
-    print("EXPERIMENT 1: Random Split (Baseline)")
-    print("=" * 70)
-    for model_name in models:
-        result = run_single_experiment(model_name, "random", epochs, data_dir=data_dir)
-        result["experiment"] = "Random Split"
-        all_results.append(result)
+    configurations = [
+        # (model, feature_mode, description)
+        ("cnn1d", "time", "CNN1D + Time Domain (Baseline)"),
+        ("cnn1d", "fft", "CNN1D + FFT Features"),
+        ("cnn1d", "both", "CNN1D + Time + FFT"),
+        ("cnn1d_deep", "fft", "Deep CNN (ResNet-style) + FFT"),
+        ("lstm", "fft", "LSTM + FFT"),
+        ("cnnlstm", "fft", "CNN-LSTM + FFT"),
+    ]
 
-    # Experiment 2: Fault-Size Split (Single Load)
-    print("\n" + "=" * 70)
-    print(f"EXPERIMENT 2: Fault-Size Split - Single Load (Test: {config['test_fault_size']})")
-    print("=" * 70)
-    for model_name in models:
-        result = run_single_experiment(model_name, "fault_size", epochs, data_dir=data_dir)
-        result["experiment"] = f"Fault-Size Single ({config['test_fault_size']})"
-        all_results.append(result)
+    for model_name, feature_mode, description in configurations:
+        print(f"\n{'#' * 70}")
+        print(f"# {description}")
+        print(f"{'#' * 70}")
 
-    # Experiment 3: Fault-Size Split (All Loads)
-    print("\n" + "=" * 70)
-    print(f"EXPERIMENT 3: Fault-Size Split - All Loads (Test: {config['test_fault_size']})")
-    print("=" * 70)
-    for model_name in models:
-        result = run_single_experiment(model_name, "fault_size_all_loads", epochs, data_dir=data_dir)
-        result["experiment"] = f"Fault-Size All Loads ({config['test_fault_size']})"
-        all_results.append(result)
-
-    # Experiment 4: Cross-Load (1772 -> 1750)
-    print("\n" + "=" * 70)
-    print("EXPERIMENT 4: Cross-Load (1772 -> 1750)")
-    print("=" * 70)
-    for model_name in models:
-        result = run_single_experiment(
-            model_name, "cross_load", epochs,
-            train_loads=["1772"], test_loads=["1750"],
+        result = run_experiment(
+            model_name=model_name,
+            split_strategy="fault_size_all_loads",
+            feature_mode=feature_mode,
+            epochs=100,
             data_dir=data_dir
         )
-        result["experiment"] = "Cross-Load (1750)"
-        all_results.append(result)
-
-    # Experiment 5: Cross-Load (1772 -> 1730)
-    print("\n" + "=" * 70)
-    print("EXPERIMENT 5: Cross-Load (1772 -> 1730)")
-    print("=" * 70)
-    for model_name in models:
-        result = run_single_experiment(
-            model_name, "cross_load", epochs,
-            train_loads=["1772"], test_loads=["1730"],
-            data_dir=data_dir
-        )
-        result["experiment"] = "Cross-Load (1730)"
-        all_results.append(result)
-
-    # Experiment 6: Cross-Load (1772 -> Both)
-    print("\n" + "=" * 70)
-    print("EXPERIMENT 6: Cross-Load (1772 -> 1750+1730)")
-    print("=" * 70)
-    for model_name in models:
-        result = run_single_experiment(
-            model_name, "cross_load", epochs,
-            train_loads=["1772"], test_loads=["1750", "1730"],
-            data_dir=data_dir
-        )
-        result["experiment"] = "Cross-Load (Both)"
+        result["description"] = description
         all_results.append(result)
 
     return all_results
 
 
-def print_summary_table(results: list):
-    """Print formatted summary table of all experiment results."""
+def print_improvement_summary(results: list):
+    """Print comparison table."""
     print("\n" + "=" * 90)
-    print("RESULTS SUMMARY")
+    print("IMPROVEMENT STUDY RESULTS")
     print("=" * 90)
-    print(f"{'Experiment':<30} {'Model':<10} {'Val Acc':<10} {'Test Acc':<10}")
+    print(f"{'Configuration':<40} {'Test Acc':<10} {'Normal':<8} {'Ball':<8} {'IR':<8} {'OR':<8}")
     print("-" * 90)
 
-    experiments = []
     for r in results:
-        if r["experiment"] not in experiments:
-            experiments.append(r["experiment"])
+        report = r["classification_report"]
+        normal = report.get("Normal", {}).get("recall", 0)
+        ball = report.get("Ball", {}).get("recall", 0)
+        ir = report.get("IR", {}).get("recall", 0)
+        or_recall = report.get("OR", {}).get("recall", 0)
 
-    for exp in experiments:
-        exp_results = [r for r in results if r["experiment"] == exp]
-        for r in exp_results:
-            print(f"{r['experiment']:<30} {r['model']:<10} "
-                  f"{r['best_val_acc']:<10.4f} {r['test_accuracy']:<10.4f}")
-        print("-" * 90)
-
-    print("\nAVERAGE TEST ACCURACY BY EXPERIMENT:")
-    for exp in experiments:
-        exp_results = [r for r in results if r["experiment"] == exp]
-        avg_acc = np.mean([r["test_accuracy"] for r in exp_results])
-        print(f"  {exp:<30}: {avg_acc:.4f}")
+        print(f"{r['description']:<40} {r['test_accuracy']:<10.4f} "
+              f"{normal:<8.3f} {ball:<8.3f} {ir:<8.3f} {or_recall:<8.3f}")
 
 
-def save_results(results: list, filename: str = "results/comprehensive_results.json"):
-    """Save results to JSON file."""
+def save_results(results: list, filename: str = "results/improvement_results.json"):
+    """Save results to JSON."""
     os.makedirs(os.path.dirname(filename), exist_ok=True)
 
-    serializable_results = []
-    for r in results:
-        r_copy = r.copy()
-        if "history" in r_copy:
-            r_copy["history"] = {
-                k: [float(v) for v in vals]
-                for k, vals in r_copy["history"].items()
-            }
-        serializable_results.append(r_copy)
-
     with open(filename, "w") as f:
-        json.dump(serializable_results, f, indent=2)
+        json.dump(results, f, indent=2, default=str)
 
     print(f"\nResults saved to {filename}")
 
@@ -267,11 +198,6 @@ if __name__ == "__main__":
     if torch.cuda.is_available():
         torch.cuda.manual_seed(config["seed"])
 
-    results = run_comprehensive_study(
-        models=["cnn1d", "lstm", "cnnlstm"],
-        epochs=50,
-        data_dir="data/raw"
-    )
-
-    print_summary_table(results)
+    results = run_improvement_study(data_dir="data/raw")
+    print_improvement_summary(results)
     save_results(results)

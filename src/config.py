@@ -19,6 +19,9 @@ config = {
     # Papers typically use 50-75% overlap, NOT 97%
     "stride": 512,
 
+    # Feature extraction mode: "time", "fft", or "both"
+    "feature_mode": "fft",
+
     # Classification setup
     # 4class groups severities by fault type for generalization testing
     "classification_mode": "4class",
@@ -55,13 +58,26 @@ config = {
     # LSTM requires higher learning rate due to gradient flow challenges
     "learning_rates": {
         "cnn1d": 1e-3,
+        "cnn1d_deep": 5e-4,
         "lstm": 1e-2,
         "cnnlstm": 1e-3,
     },
 
+    # Regularization
+    "weight_decay": 1e-4,
+    "dropout": 0.3,
+
     # Early stopping prevents overfitting while allowing convergence
     "early_stopping_patience": 10,
     "early_stopping_min_delta": 0.001,
+
+    # Data augmentation
+    "augmentation": {
+        "enabled": True,
+        "noise_std": 0.05,
+        "scale_range": (0.9, 1.1),
+        "time_shift_max": 50,
+    },
 }
 
 
