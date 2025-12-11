@@ -1,142 +1,273 @@
-"""
-Deep learning models for bearing fault diagnosis.
-"""
-
 import torch
 import torch.nn as nn
 
-from config import config
+import config
 
 
-class CNN1D(nn.Module):
-    """1D CNN for raw vibration signals."""
+# =============================================================================
+# Weight init
+# =============================================================================
 
-    def __init__(self, num_classes: int = 10, dropout: float = 0.3):
+def _init_weights(module):
+    """Init weights using Kaiming initialization."""
+    if isinstance(module, nn.Conv1d):
+        nn.init.kaiming_normal_(module.weight, mode='fan_out', nonlinearity='relu')
+        if module.bias is not None:
+            nn.init.zeros_(module.bias)
+    elif isinstance(module, nn.BatchNorm1d):
+        nn.init.ones_(module.weight)
+        nn.init.zeros_(module.bias)
+    elif isinstance(module, nn.Linear):
+        nn.init.kaiming_normal_(module.weight, mode='fan_out', nonlinearity='relu')
+        if module.bias is not None:
+            nn.init.zeros_(module.bias)
+
+
+# =============================================================================
+# Models
+# =============================================================================
+
+class CNN(nn.Module):
+    """
+    1D Convolutional Neural Network.
+    
+    Architecture:
+        Conv1d(1 -> 32, k=7) -> BN -> ReLU -> MaxPool -> Dropout
+        Conv1d(32 -> 64, k=5) -> BN -> ReLU -> MaxPool -> Dropout
+        Conv1d(64 -> 128, k=3) -> BN -> ReLU -> AdaptiveAvgPool
+        Linear(128 -> 64) -> ReLU -> Dropout -> Linear(64 -> num_classes)
+
+    Parameters: ~36K (for num_classes=4)
+    """
+
+    def __init__(self, num_classes: int, in_channels: int = 1, dropout: float = None):
         super().__init__()
+
+        if dropout is None:
+            dropout = config.DROPOUT
+
         self.features = nn.Sequential(
-            nn.Conv1d(1, 32, kernel_size=64, stride=8, padding=28),
+            nn.Conv1d(in_channels, 32, kernel_size=7, padding=3),
             nn.BatchNorm1d(32),
-            nn.ReLU(),
+            nn.ReLU(inplace=True),
             nn.MaxPool1d(2),
+            nn.Dropout(0.2),
 
-            nn.Conv1d(32, 64, kernel_size=32, stride=4, padding=14),
+            nn.Conv1d(32, 64, kernel_size=5, padding=2),
             nn.BatchNorm1d(64),
-            nn.ReLU(),
+            nn.ReLU(inplace=True),
             nn.MaxPool1d(2),
+            nn.Dropout(0.2),
 
-            nn.Conv1d(64, 128, kernel_size=16, stride=2, padding=7),
+            nn.Conv1d(64, 128, kernel_size=3, padding=1),
             nn.BatchNorm1d(128),
-            nn.ReLU(),
+            nn.ReLU(inplace=True),
             nn.AdaptiveAvgPool1d(1),
         )
+
         self.classifier = nn.Sequential(
             nn.Flatten(),
             nn.Linear(128, 64),
-            nn.ReLU(),
+            nn.ReLU(inplace=True),
             nn.Dropout(dropout),
             nn.Linear(64, num_classes),
         )
 
+        self.apply(_init_weights)
+
     def forward(self, x):
-        return self.classifier(self.features(x))
+        x = self.features(x)
+        x = self.classifier(x)
+        return x
 
 
 class LSTM(nn.Module):
-    """LSTM with convolutional downsampling for raw vibration signals."""
+    """
+    Bidirectional LSTM with CNN preprocessing.
+    
+    Architecture:
+        Conv1d downsampling (helps reduce sequence length)
+        2-layer Bidirectional LSTM
+        Classifier on concatenated final hidden states
+    
+    Parameters: ~181K (for num_classes=4)
+    """
 
-    def __init__(self, num_classes: int = 10, hidden_size: int = 128,
-                 num_layers: int = 2, dropout: float = 0.3):
+    def __init__(self, num_classes: int, in_channels: int = 1,
+                 hidden_size: int = 128, dropout: float = None):
         super().__init__()
-        # Downsample: 2048 -> ~128 timesteps
+
+        if dropout is None:
+            dropout = config.DROPOUT
+
         self.downsample = nn.Sequential(
-            nn.Conv1d(1, 32, kernel_size=64, stride=16, padding=24),
-            nn.BatchNorm1d(32),
-            nn.ReLU(),
+            nn.Conv1d(in_channels, 64, kernel_size=7, stride=4, padding=3),
+            nn.BatchNorm1d(64),
+            nn.ReLU(inplace=True),
+            nn.Conv1d(64, 64, kernel_size=5, stride=4, padding=2),
+            nn.BatchNorm1d(64),
+            nn.ReLU(inplace=True),
         )
-        
+
         self.lstm = nn.LSTM(
-            input_size=32,
+            input_size=64,
             hidden_size=hidden_size,
-            num_layers=num_layers,
+            num_layers=2,
             batch_first=True,
-            dropout=dropout if num_layers > 1 else 0,
             bidirectional=True,
+            dropout=dropout if dropout > 0 else 0,
         )
+
         self.classifier = nn.Sequential(
             nn.Linear(hidden_size * 2, 64),
-            nn.ReLU(),
+            nn.ReLU(inplace=True),
             nn.Dropout(dropout),
             nn.Linear(64, num_classes),
         )
 
+        self.apply(_init_weights)
+
     def forward(self, x):
-        x = self.downsample(x)  # (batch, 32, ~128)
-        x = x.transpose(1, 2)   # (batch, ~128, 32)
-        _, (h_n, _) = self.lstm(x)
-        h = torch.cat([h_n[-2], h_n[-1]], dim=1)
-        return self.classifier(h)
+        # Downsample: (batch, channels, seq) -> (batch, 64, seq/16)
+        x = self.downsample(x)
+
+        # Reshape for LSTM: (batch, seq, channels)
+        x = x.permute(0, 2, 1)
+
+        # LSTM
+        _, (hidden, _) = self.lstm(x)
+
+        # Concatenate forward and backward final hidden states
+        hidden_cat = torch.cat((hidden[-2], hidden[-1]), dim=1)
+
+        # Classify
+        x = self.classifier(hidden_cat)
+        return x
 
 
 class CNNLSTM(nn.Module):
-    """CNN feature extraction + LSTM temporal modeling."""
+    """
+    Hybrid CNN-LSTM architecture.
+    
+    Architecture:
+        Deeper CNN feature extraction
+        2-layer Bidirectional LSTM
+        Classifier on concatenated final hidden states
+    
+    Parameters: ~238K (for num_classes=4)
+    """
 
-    def __init__(self, num_classes: int = 10, hidden_size: int = 64,
-                 num_layers: int = 1, dropout: float = 0.3):
+    def __init__(self, num_classes: int, in_channels: int = 1,
+                 hidden_size: int = 128, dropout: float = None):
         super().__init__()
-        self.cnn = nn.Sequential(
-            nn.Conv1d(1, 32, kernel_size=64, stride=4, padding=30),
-            nn.BatchNorm1d(32),
-            nn.ReLU(),
-            nn.MaxPool1d(2),
 
-            nn.Conv1d(32, 64, kernel_size=32, stride=2, padding=15),
+        if dropout is None:
+            dropout = config.DROPOUT
+
+        self.cnn = nn.Sequential(
+            nn.Conv1d(in_channels, 32, kernel_size=7, padding=3),
+            nn.BatchNorm1d(32),
+            nn.ReLU(inplace=True),
+            nn.MaxPool1d(2),
+            nn.Dropout(0.1),
+
+            nn.Conv1d(32, 64, kernel_size=5, padding=2),
             nn.BatchNorm1d(64),
-            nn.ReLU(),
+            nn.ReLU(inplace=True),
+            nn.MaxPool1d(2),
+            nn.Dropout(0.1),
+
+            nn.Conv1d(64, 128, kernel_size=3, padding=1),
+            nn.BatchNorm1d(128),
+            nn.ReLU(inplace=True),
             nn.MaxPool1d(2),
         )
+
         self.lstm = nn.LSTM(
-            input_size=64,
+            input_size=128,
             hidden_size=hidden_size,
-            num_layers=num_layers,
+            num_layers=2,
             batch_first=True,
             bidirectional=True,
+            dropout=dropout if dropout > 0 else 0,
         )
+
         self.classifier = nn.Sequential(
-            nn.Linear(hidden_size * 2, 32),
-            nn.ReLU(),
+            nn.Linear(hidden_size * 2, 64),
+            nn.ReLU(inplace=True),
             nn.Dropout(dropout),
-            nn.Linear(32, num_classes),
+            nn.Linear(64, num_classes),
         )
+
+        self.apply(_init_weights)
 
     def forward(self, x):
+        # CNN features: (batch, 1, seq) -> (batch, 128, seq/8)
         x = self.cnn(x)
-        x = x.transpose(1, 2)
-        _, (h_n, _) = self.lstm(x)
-        h = torch.cat([h_n[-2], h_n[-1]], dim=1)
-        return self.classifier(h)
+
+        # Reshape for LSTM: (batch, seq, channels)
+        x = x.permute(0, 2, 1)
+
+        # LSTM
+        _, (hidden, _) = self.lstm(x)
+
+        # Concatenate bidirectional hidden states
+        hidden_cat = torch.cat((hidden[-2], hidden[-1]), dim=1)
+
+        # Classify
+        x = self.classifier(hidden_cat)
+        return x
 
 
-def get_model(name: str) -> nn.Module:
-    """Factory function to get model by name."""
-    models = {
-        "cnn1d": CNN1D,
-        "lstm": LSTM,
-        "cnnlstm": CNNLSTM,
-    }
-    if name not in models:
-        raise ValueError(f"Unknown model: {name}. Choose from {list(models.keys())}")
+# =============================================================================
+# Model registry
+# =============================================================================
 
-    return models[name](
-        num_classes=config["num_classes"],
-        dropout=config["dropout"],
-    )
+MODELS = {
+    "cnn": CNN,
+    "lstm": LSTM,
+    "cnnlstm": CNNLSTM,
+}
 
+
+def create_model(name: str, num_classes: int, dropout: float = None) -> nn.Module:
+    """
+    Create a model instance.
+    
+    Args:
+        name: Model name ("cnn", "lstm", "cnnlstm")
+        num_classes: Number of output classes
+        dropout: Dropout rate (optional)
+        
+    Returns:
+        The instance of the Model
+    """
+    if name not in MODELS:
+        raise ValueError(f"Unknown model: {name}. Available: {list(MODELS.keys())}")
+
+    kwargs = {"num_classes": num_classes}
+    if dropout is not None:
+        kwargs["dropout"] = dropout
+
+    return MODELS[name](**kwargs)
+
+
+def count_parameters(model: nn.Module) -> int:
+    """Count trainable parameters."""
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+
+# =============================================================================
+# Testing
+# =============================================================================
 
 if __name__ == "__main__":
-    batch = torch.randn(4, 1, 2048)
+    print("Model Parameter Counts:")
 
-    for name in ["cnn1d", "lstm", "cnnlstm"]:
-        model = get_model(name)
-        out = model(batch)
-        params = sum(p.numel() for p in model.parameters())
-        print(f"{name:8} | output: {out.shape} | params: {params:,}")
+    x = torch.randn(2, 1, 1025)
+
+    for name in MODELS:
+        model = create_model(name, num_classes=4)
+        params = count_parameters(model)
+        y = model(x)
+        print(f"{name.upper():10} {params:>10,} params  |  {x.shape} -> {y.shape}")
