@@ -117,7 +117,7 @@ def print_summary_table(study_name: str, stats: dict = None):
 
                 m = models[model]
                 acc = m.get("accuracy", {})
-                acc_str = f"{acc.get('mean', 0):.3f} ± {acc.get('std', 0):.3f}" if acc else "-"
+                acc_str = f"{acc.get('mean', 0):.3f} +- {acc.get('std', 0):.3f}" if acc else "-"
 
                 recalls = []
                 for cls in ["Normal", "Ball", "IR", "OR"]:
@@ -139,13 +139,13 @@ def print_summary_table(study_name: str, stats: dict = None):
 
                 m = models[model]
                 macro = m.get("macro_auroc", {})
-                macro_str = f"{macro.get('mean', 0):.3f} ± {macro.get('std', 0):.3f}" if macro else "-"
+                macro_str = f"{macro.get('mean', 0):.3f} +- {macro.get('std', 0):.3f}" if macro else "-"
 
                 aurocs = []
                 for cls in ["Ball", "IR", "OR"]:
                     a = m.get(f"auroc_{cls}", {})
                     if a:
-                        aurocs.append(f"{a.get('mean', 0):.3f} ± {a.get('std', 0):.3f}")
+                        aurocs.append(f"{a.get('mean', 0):.3f} +- {a.get('std', 0):.3f}")
                     else:
                         aurocs.append("-")
 

@@ -1,21 +1,9 @@
-"""
-OR Fault Severity Non-Monotonicity Analysis (Publication Quality).
-
-Investigates why OR faults fail catastrophically on fault-size split
-while Ball and IR faults generalize successfully.
-
-Usage:
-    python or_fault_analysis_v2.py --data_dir path/to/cwru/data --output_dir results/analysis
-"""
-
 import argparse
 import os
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.patches import FancyBboxPatch
-from pathlib import Path
 
-# Set publication-quality defaults
+# Set some defaults
 plt.rcParams.update({
     'font.size': 11,
     'font.family': 'sans-serif',

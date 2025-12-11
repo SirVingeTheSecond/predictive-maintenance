@@ -320,7 +320,7 @@ def aggregate_seed_results(results: list) -> dict:
     """
     Aggregate results across seeds for a single model/config.
     
-    Reports mean ± std as recommended by papers:
+    Reports mean +- std as recommended by papers:
     - Rosa et al.: 30 seeds
     - ECMCTP: 10 seeds
     - CNN-LSTM: 5-fold CV

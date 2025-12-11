@@ -332,10 +332,8 @@ def train_kfold_cv(
     optimal_epochs = max(median_best_epoch, 10) # At least 10 epochs
     
     if verbose:
-        print(f"\n{'='*60}")
         print(f"K-Fold CV Summary ({n_folds} folds)")
-        print(f"{'='*60}")
-        print(f"Val Accuracy: {np.mean(val_accs):.4f} ± {np.std(val_accs):.4f}")
+        print(f"Val Accuracy: {np.mean(val_accs):.4f} +- {np.std(val_accs):.4f}")
         print(f"Best epochs per fold: {best_epochs}")
         print(f"Optimal epochs for retraining: {optimal_epochs}")
     
