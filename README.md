@@ -82,13 +82,10 @@ This is the main experiment. It trains CNN, LSTM, and CNN LSTM across all split 
 # Step 1: Run all experiments (grab your popcorn)
 python -m src.main run comparison
 
-# Step 2: Check progress anytime
-python -m src.main status comparison
-
-# Step 3: Analyze results
+# Step 2: Analyze results
 python -m src.main analyze comparison
 
-# Step 4: Generate figures
+# Step 3: Generate figures
 python -m src.main figures comparison
 ```
 
