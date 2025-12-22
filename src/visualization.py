@@ -307,7 +307,7 @@ def fig_confusion_matrix(study_name: str, figures_dir: str):
 def fig_training_curves(study_name: str, figures_dir: str):
     """Training loss and accuracy curves."""
     results_dir = Path(config.RESULTS_DIR) / study_name
-    exp_dirs = list(results_dir.glob("cnn_4class_random_seed42"))
+    exp_dirs = list(results_dir.glob("cnn_4class_fault_size*_seed42"))
 
     if not exp_dirs:
         exp_dirs = list(results_dir.glob("cnn_*_seed42"))
@@ -542,6 +542,9 @@ def generate_all_figures(study_name: str, stats: dict = None):
 
     figures_dir = os.path.join(config.FIGURES_DIR, study_name)
     os.makedirs(figures_dir, exist_ok=True)
+
+    # The step numbers are hardcoded by design.
+    # The figure pipeline is static, so a dynamic counter would add complexity without improving clarity.
 
     print_header(f"GENERATING FIGURES: {study_name}")
     print(f"Output: {figures_dir}\n")

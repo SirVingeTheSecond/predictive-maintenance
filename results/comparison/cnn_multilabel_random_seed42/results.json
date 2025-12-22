@@ -1,0 +1,42 @@
+{
+  "model": "cnn",
+  "mode": "multilabel",
+  "split": "random",
+  "seed": 42,
+  "parameters": 44163,
+  "epochs_trained": 49,
+  "best_val_acc": 0.9965635738831615,
+  "best_epoch": 37,
+  "test_metrics": {
+    "macro_auroc": 1.0,
+    "per_class_auroc": {
+      "Ball": 1.0,
+      "IR": 1.0,
+      "OR": 1.0,
+      "macro": 1.0
+    },
+    "per_class_metrics": {
+      "Ball": {
+        "precision": 1.0,
+        "recall": 0.9924242424242424,
+        "f1": 0.9961977186311787,
+        "auroc": 1.0
+      },
+      "IR": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "auroc": 1.0
+      },
+      "OR": {
+        "precision": 0.9924812030075187,
+        "recall": 1.0,
+        "f1": 0.9962264150943396,
+        "auroc": 1.0
+      }
+    }
+  },
+  "noise_robustness": null,
+  "kfold_cv": null,
+  "timestamp": "2025-12-21T13:01:36.271210"
+}

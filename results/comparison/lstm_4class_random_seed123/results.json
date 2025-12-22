@@ -1,0 +1,72 @@
+{
+  "model": "lstm",
+  "mode": "4class",
+  "split": "random",
+  "seed": 123,
+  "parameters": 631940,
+  "epochs_trained": 18,
+  "best_val_acc": 1.0,
+  "best_epoch": 3,
+  "test_metrics": {
+    "accuracy": 1.0,
+    "macro_precision": 1.0,
+    "macro_recall": 1.0,
+    "macro_f1": 1.0,
+    "macro_auroc": 1.0,
+    "per_class_metrics": {
+      "Normal": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 186
+      },
+      "Ball": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 132
+      },
+      "IR": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 132
+      },
+      "OR": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 132
+      }
+    },
+    "confusion_matrix": [
+      [
+        186,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        132,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        132,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        132
+      ]
+    ]
+  },
+  "noise_robustness": null,
+  "kfold_cv": null,
+  "timestamp": "2025-12-21T13:05:00.355423"
+}

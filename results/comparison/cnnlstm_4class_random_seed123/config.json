@@ -1,0 +1,14 @@
+{
+  "model": "cnnlstm",
+  "mode": "4class",
+  "split": "random",
+  "seed": 123,
+  "epochs": 100,
+  "epochs_requested": 100,
+  "use_kfold_cv": false,
+  "n_folds": null,
+  "lr": 0.001,
+  "weight_decay": 0.0001,
+  "dropout": 0.3,
+  "batch_size": 64
+}

@@ -1,0 +1,42 @@
+{
+  "model": "cnnlstm",
+  "mode": "multilabel",
+  "split": "random",
+  "seed": 1024,
+  "parameters": 711811,
+  "epochs_trained": 23,
+  "best_val_acc": 1.0,
+  "best_epoch": 6,
+  "test_metrics": {
+    "macro_auroc": 1.0,
+    "per_class_auroc": {
+      "Ball": 1.0,
+      "IR": 1.0,
+      "OR": 1.0,
+      "macro": 1.0
+    },
+    "per_class_metrics": {
+      "Ball": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "auroc": 1.0
+      },
+      "IR": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "auroc": 1.0
+      },
+      "OR": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "auroc": 1.0
+      }
+    }
+  },
+  "noise_robustness": null,
+  "kfold_cv": null,
+  "timestamp": "2025-12-21T13:15:40.734463"
+}
