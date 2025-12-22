@@ -1,21 +1,13 @@
-"""
-Data augmentation experiment.
-
-Tests various augmentation policies on fault-size split.
-
-Usage:
-    python experiments/run_augmentation.py --mode quick
-    python experiments/run_augmentation.py --mode full
-    python experiments/run_augmentation.py --mode single --policy moderate
-"""
-
 import sys
 import json
 import argparse
 from pathlib import Path
 from datetime import datetime
+from collections import defaultdict
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+import numpy as np
+
+sys.path.insert(0, str(Path(__file__).parent))
 
 from torch.utils.data import DataLoader
 
@@ -25,29 +17,36 @@ from src.data import load_data, SignalDataset
 from src.training import train
 from src.evaluation import evaluate
 from src.utils import get_device, set_seed, count_parameters, print_header, print_separator
-from src.augmentation import AugmentedSignalDataset, get_augmentation_policy
+from src.augmentation import AugmentedSignalDataset, get_augmentations
 
+
+# Results directory
 RESULTS_DIR = Path(config.RESULTS_DIR) / "augmentation"
 
-POLICIES = ["none", "noise_only", "warp_only", "scale_only", "light", "moderate", "heavy"]
-SEEDS = [42, 123, 456]
+# Augmentations to test
+AUGMENTATIONS = ["none", "noise_only", "warp_only", "scale_only", "light", "moderate", "heavy"]
 
 
 def run_single_experiment(
     model_name: str = "cnn",
-    policy_name: str = "none",
+    augmentation_name: str = "none",
     mode: str = "4class",
     split: str = "fault_size_all_loads",
-    seed: int = 42,
-    epochs: int = 100,
+    seed: int = None,
+    epochs: int = None,
     verbose: bool = True,
 ) -> dict:
-    """Run single experiment with specified augmentation policy."""
+    """Run single experiment with specified augmentation."""
+    if seed is None:
+        seed = config.DEFAULT_SEED
+    if epochs is None:
+        epochs = config.EPOCHS
+
     set_seed(seed)
     device = get_device()
 
     if verbose:
-        print_header(f"Model: {model_name} | Aug: {policy_name} | Seed: {seed}", width=60)
+        print_header(f"Model: {model_name} | Aug: {augmentation_name} | Seed: {seed}", width=60)
 
     # Load data
     data = load_data(mode=mode, split=split, seed=seed, verbose=False)
@@ -55,13 +54,13 @@ def run_single_experiment(
     # Create datasets
     base_train_dataset = SignalDataset(data["X_train"], data["y_train"], mode)
 
-    if policy_name == "none":
+    if augmentation_name == "none":
         train_dataset = base_train_dataset
     else:
-        policy = get_augmentation_policy(policy_name)
+        augmentation = get_augmentations(augmentation_name)
         train_dataset = AugmentedSignalDataset(
             base_train_dataset,
-            augmentation_policy=policy,
+            augmentations=augmentation,
             augment_prob=0.8
         )
 
@@ -104,12 +103,12 @@ def run_single_experiment(
         verbose=verbose,
     )
 
-    # Evaluate - FIXED: correct argument order (device, mode)
+    # Evaluate
     test_metrics = evaluate(model, test_loader, device, mode)
 
     result = {
         "model": model_name,
-        "augmentation": policy_name,
+        "augmentation": augmentation_name,
         "mode": mode,
         "split": split,
         "seed": seed,
@@ -132,41 +131,44 @@ def run_single_experiment(
 
 def run_sweep(
     models: list = None,
-    policies: list = None,
+    augmentations: list = None,
     seeds: list = None,
-    epochs: int = 100,
+    epochs: int = None,
     verbose: bool = True,
 ):
     """Run full augmentation sweep."""
     if models is None:
         models = ["cnn"]
-    if policies is None:
-        policies = POLICIES
+    if augmentations is None:
+        augmentations = AUGMENTATIONS
     if seeds is None:
-        seeds = SEEDS
+        seeds = config.EXPERIMENT_SEEDS
+    if epochs is None:
+        epochs = config.EPOCHS
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
     all_results = []
-    total = len(models) * len(policies) * len(seeds)
+    total = len(models) * len(augmentations) * len(seeds)
     current = 0
 
     print_header("AUGMENTATION SWEEP")
     print(f"Total experiments: {total}")
     print(f"Models: {models}")
-    print(f"Policies: {policies}")
-    print(f"Seeds: {seeds}\n")
+    print(f"Augmentations: {augmentations}")
+    print(f"Seeds: {seeds}")
+    print()
 
     for model_name in models:
-        for policy_name in policies:
+        for augmentation_name in augmentations:
             for seed in seeds:
                 current += 1
-                print(f"[{current}/{total}] {model_name} + {policy_name} (seed={seed})")
+                print(f"[{current}/{total}] {model_name} + {augmentation_name} (seed={seed})")
 
                 try:
                     result = run_single_experiment(
                         model_name=model_name,
-                        policy_name=policy_name,
+                        augmentation_name=augmentation_name,
                         seed=seed,
                         epochs=epochs,
                         verbose=verbose,
@@ -176,7 +178,7 @@ def run_sweep(
                     print(f"  ERROR: {e}")
                     all_results.append({
                         "model": model_name,
-                        "augmentation": policy_name,
+                        "augmentation": augmentation_name,
                         "seed": seed,
                         "error": str(e),
                     })
@@ -197,33 +199,31 @@ def run_sweep(
 
 def print_summary(results: list):
     """Print summary of augmentation results."""
-    from collections import defaultdict
-    import numpy as np
-
-    # Aggregate by policy
-    policy_stats = defaultdict(list)
+    # Aggregate by augmentation
+    augmentation_stats = defaultdict(list)
     for r in results:
         if "error" not in r:
-            policy_stats[r["augmentation"]].append(r["test_metrics"]["accuracy"])
+            augmentation_stats[r["augmentation"]].append(r["test_metrics"]["accuracy"])
 
     print_separator()
     print("SUMMARY")
     print_separator()
-    print(f"{'Policy':<12} {'Accuracy (%)':>12} {'Std':>10} {'N':>5}")
-    print_separator(char="-", width=42)
+    print(f"{'Augmentation':<12} {'Accuracy (%)':<15} {'Std':<10} {'N':<5}")
+    print_separator(char="-", width=45)
 
     summary = []
-    for policy, accs in sorted(policy_stats.items()):
+    for aug_name, accs in sorted(augmentation_stats.items()):
         mean = np.mean(accs) * 100
         std = np.std(accs) * 100
-        summary.append((policy, mean, std, len(accs)))
+        summary.append((aug_name, mean, std, len(accs)))
 
-    for policy, mean, std, n in sorted(summary, key=lambda x: -x[1]):
-        print(f"{policy:<12} {mean:>12.2f} {std:>10.2f} {n:>5}")
+    for aug_name, mean, std, n in sorted(summary, key=lambda x: -x[1]):
+        print(f"{aug_name:<12} {mean:<15.2f} {std:<10.2f} {n:<5}")
 
     if summary:
         best = max(summary, key=lambda x: x[1])
-        print(f"\nBest: {best[0]} ({best[1]:.2f}% +- {best[2]:.2f}%)")
+        print()
+        print(f"Best: {best[0]} ({best[1]:.2f}% ± {best[2]:.2f}%)")
 
 
 def main():
@@ -234,28 +234,49 @@ def main():
         default="quick",
         help="Experiment mode",
     )
-    parser.add_argument("--policy", default="moderate", help="Policy for single mode")
-    parser.add_argument("--seed", type=int, default=42, help="Seed for single mode")
-    parser.add_argument("--epochs", type=int, default=100, help="Training epochs")
-    parser.add_argument("--verbose", action="store_true", help="Verbose output")
+    parser.add_argument(
+        "--augmentation",
+        default="moderate",
+        help="Augmentation for single mode"
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=config.DEFAULT_SEED,
+        help="Seed for single mode"
+    )
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=None,
+        help="Training epochs (default: config.EPOCHS)"
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Verbose output"
+    )
     args = parser.parse_args()
 
     if args.mode == "quick":
+        # Quick test: fewer augmentations, 1 seed, 50 epochs
         run_sweep(
-            policies=["none", "noise_only", "moderate"],
-            seeds=[42],
+            augmentations=["none", "noise_only", "moderate"],
+            seeds=[config.DEFAULT_SEED],
             epochs=50,
             verbose=args.verbose,
         )
     elif args.mode == "full":
+        # Full sweep: all augmentations, all seeds
         run_sweep(
-            seeds=SEEDS,
+            seeds=config.EXPERIMENT_SEEDS,
             epochs=args.epochs,
             verbose=args.verbose,
         )
     else:
+        # Single experiment
         run_single_experiment(
-            policy_name=args.policy,
+            augmentation_name=args.augmentation,
             seed=args.seed,
             epochs=args.epochs,
             verbose=True,

@@ -86,18 +86,21 @@ class CNN(nn.Module):
         if dropout is None:
             dropout = config.DROPOUT
 
+        # Lighter dropout in conv blocks, full dropout in classifier
+        conv_dropout = dropout * 0.67
+
         self.features = nn.Sequential(
             nn.Conv1d(in_channels, 32, kernel_size=7, padding=3),
             nn.BatchNorm1d(32),
             get_activation(activation),
             nn.MaxPool1d(2),
-            nn.Dropout(0.2),
+            nn.Dropout(conv_dropout),
 
             nn.Conv1d(32, 64, kernel_size=5, padding=2),
             nn.BatchNorm1d(64),
             get_activation(activation),
             nn.MaxPool1d(2),
-            nn.Dropout(0.2),
+            nn.Dropout(conv_dropout),
 
             nn.Conv1d(64, 128, kernel_size=3, padding=1),
             nn.BatchNorm1d(128),
@@ -331,18 +334,21 @@ class CNNLSTM(nn.Module):
         if dropout is None:
             dropout = config.DROPOUT
 
+        # Lighter dropout in conv blocks (a bit lighter here as LSTM provides additional regularization)
+        conv_dropout = dropout * 0.33
+
         self.cnn = nn.Sequential(
             nn.Conv1d(in_channels, 32, kernel_size=7, padding=3),
             nn.BatchNorm1d(32),
             get_activation(activation),
             nn.MaxPool1d(2),
-            nn.Dropout(0.1),
+            nn.Dropout(conv_dropout),
 
             nn.Conv1d(32, 64, kernel_size=5, padding=2),
             nn.BatchNorm1d(64),
             get_activation(activation),
             nn.MaxPool1d(2),
-            nn.Dropout(0.1),
+            nn.Dropout(conv_dropout),
 
             nn.Conv1d(64, 128, kernel_size=3, padding=1),
             nn.BatchNorm1d(128),

@@ -1,16 +1,8 @@
-"""
-Visualization module for bearing fault diagnosis.
-
-Generates all figures for paper via: python -m src.main figures comparison
-"""
-
 import os
 import json
-from pathlib import Path
 
 import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sns
 
 from . import config
 from .utils import print_header, print_separator
@@ -48,7 +40,7 @@ CLASS_COLORS = ['#27ae60', '#f39c12', '#e74c3c', '#8e44ad']
 
 
 def _save_figure(figures_dir: str, name: str):
-    """Save figure in PNG and PDF formats."""
+    """Save figure in PNG and PDF."""
     png_path = os.path.join(figures_dir, f"{name}.png")
     pdf_path = os.path.join(figures_dir, f"{name}.pdf")
     plt.savefig(png_path)
@@ -58,7 +50,7 @@ def _save_figure(figures_dir: str, name: str):
 
 
 # =============================================================================
-# Basic Plots
+# Let the Plots begin
 # =============================================================================
 
 def plot_training_curves(history: dict, save_path: str = None):
@@ -85,44 +77,50 @@ def plot_training_curves(history: dict, save_path: str = None):
     axes[1].set_title('Training and Validation Accuracy')
     axes[1].legend()
     axes[1].grid(True, alpha=0.3)
-    axes[1].set_ylim(0, 1.05)
 
     plt.tight_layout()
 
     if save_path:
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
         plt.close()
     else:
         plt.show()
 
 
-def plot_confusion_matrix(
-        cm: np.ndarray,
-        class_names: list,
-        normalize: bool = True,
-        save_path: str = None,
-        title: str = "Confusion Matrix",
-):
-    """Plot confusion matrix heatmap."""
+def plot_confusion_matrix(cm: np.ndarray, class_names: list, save_path: str = None,
+                          normalize: bool = False, title: str = None):
+    """Plot confusion matrix with nice formatting."""
     if normalize:
-        cm_plot = cm.astype('float') / (cm.sum(axis=1, keepdims=True) + 1e-8)
-        fmt = '.2f'
-    else:
-        cm_plot = cm
-        fmt = 'd'
+        cm = cm.astype('float') / cm.sum(axis=1, keepdims=True)
 
-    fig, ax = plt.subplots(figsize=(8, 6))
-    sns.heatmap(cm_plot, annot=True, fmt=fmt, cmap='Blues',
-                xticklabels=class_names, yticklabels=class_names, ax=ax)
+    fig, ax = plt.subplots(figsize=(6, 5))
+    im = ax.imshow(cm, interpolation='nearest', cmap='Blues')
+
+    ax.set_xticks(np.arange(len(class_names)))
+    ax.set_yticks(np.arange(len(class_names)))
+    ax.set_xticklabels(class_names)
+    ax.set_yticklabels(class_names)
+
+    # Rotate x labels for readability
+    plt.setp(ax.get_xticklabels(), rotation=45, ha='right', rotation_mode='anchor')
+
+    # Add text annotations
+    fmt = '.2f' if normalize else 'd'
+    thresh = cm.max() / 2.
+    for i in range(cm.shape[0]):
+        for j in range(cm.shape[1]):
+            ax.text(j, i, format(cm[i, j], fmt),
+                    ha='center', va='center',
+                    color='white' if cm[i, j] > thresh else 'black')
+
     ax.set_xlabel('Predicted')
     ax.set_ylabel('True')
-    ax.set_title(title)
+    ax.set_title(title or 'Confusion Matrix')
 
+    fig.colorbar(im, ax=ax)
     plt.tight_layout()
 
     if save_path:
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
         plt.close()
     else:
@@ -130,243 +128,336 @@ def plot_confusion_matrix(
 
 
 # =============================================================================
-# Paper Figures
+# Paper-Specific Figures
 # =============================================================================
 
 def fig_model_comparison(stats: dict, figures_dir: str):
-    """Model comparison bar chart with accuracy."""
-    config_name = "4class_fault_size"
+    """Generate main model comparison figure for paper."""
+    # Pick the right key
+    config_name = '4class_fault_size_all_loads'
     if config_name not in stats:
-        print(f"  Config {config_name} not found")
+        config_name = '4class_fault_size'
+
+    if config_name not in stats:
+        print(f"  WARNING: fault_size config not found in stats, skipping")
         return
 
-    fig, ax = plt.subplots(figsize=(5, 4))
-
-    models = ['cnn', 'lstm', 'cnnlstm']
-    model_labels = ['CNN', 'LSTM', 'CNN-LSTM']
     config_stats = stats[config_name]
 
-    means, stds = [], []
-    for model in models:
+    models = []
+    means = []
+    stds = []
+    colors = []
+
+    for model in ['cnn', 'lstm', 'cnnlstm']:
         if model in config_stats and 'accuracy' in config_stats[model]:
+            models.append({'cnn': 'CNN', 'lstm': 'LSTM', 'cnnlstm': 'CNN-LSTM'}[model])
             means.append(config_stats[model]['accuracy']['mean'] * 100)
             stds.append(config_stats[model]['accuracy']['std'] * 100)
-        else:
-            means.append(0)
-            stds.append(0)
+            colors.append(COLORS[{'cnn': 'CNN', 'lstm': 'LSTM', 'cnnlstm': 'CNN-LSTM'}[model]])
+
+    fig, ax = plt.subplots(figsize=(6, 5))
 
     x = np.arange(len(models))
-    colors = [COLORS[label] for label in model_labels]
+    bars = ax.bar(x, means, yerr=stds, capsize=5, color=colors, edgecolor='black', linewidth=0.5)
 
-    bars = ax.bar(x, means, yerr=stds, capsize=5, color=colors,
-                  edgecolor='black', linewidth=0.5)
-
-    ax.set_xlabel('Model Architecture')
     ax.set_ylabel('Accuracy (%)')
+    ax.set_xlabel('Model Architecture')
     ax.set_title('Model Comparison (Fault-Size Split)')
     ax.set_xticks(x)
-    ax.set_xticklabels(model_labels)
+    ax.set_xticklabels(models)
     ax.set_ylim(0, 100)
-    ax.axhline(y=25, color='gray', linestyle='--', linewidth=0.8, label='Random chance')
-    ax.legend(loc='lower right')
+    ax.axhline(y=25, color='gray', linestyle='--', linewidth=1, alpha=0.5, label='Random chance')
+    ax.legend()
 
+    # Add value labels
     for bar, mean, std in zip(bars, means, stds):
-        ax.annotate(f'{mean:.1f}+-{std:.1f}',
-                    xy=(bar.get_x() + bar.get_width() / 2, bar.get_height()),
-                    ha='center', va='bottom', fontsize=8)
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + std + 1,
+                f'{mean:.1f}±{std:.1f}', ha='center', va='bottom', fontsize=9)
 
     plt.tight_layout()
     _save_figure(figures_dir, "fig01_model_comparison")
 
 
 def fig_per_class_performance(stats: dict, figures_dir: str):
-    """Per-class recall comparison across models."""
-    config_name = "4class_fault_size"
+    """Per-class recall comparison."""
+    config_name = '4class_fault_size_all_loads'
     if config_name not in stats:
-        print(f"  Config {config_name} not found")
+        config_name = '4class_fault_size'
+
+    if config_name not in stats:
+        print(f"  WARNING: fault_size config not found, skipping")
         return
 
-    fig, ax = plt.subplots(figsize=(7, 4))
-
-    models = ['cnn', 'lstm', 'cnnlstm']
-    model_labels = ['CNN', 'LSTM', 'CNN-LSTM']
-    classes = ['Normal', 'Ball', 'IR', 'OR']
     config_stats = stats[config_name]
+    classes = ['Normal', 'Ball', 'IR', 'OR']
+    model_names = ['CNN', 'LSTM', 'CNN-LSTM']
+    model_keys = ['cnn', 'lstm', 'cnnlstm']
+
+    fig, ax = plt.subplots(figsize=(8, 5))
 
     x = np.arange(len(classes))
     width = 0.25
 
-    for i, (model, label) in enumerate(zip(models, model_labels)):
-        if model not in config_stats:
+    for i, (model_key, model_name) in enumerate(zip(model_keys, model_names)):
+        if model_key not in config_stats:
             continue
+
         recalls = []
         for cls in classes:
-            key = f'recall_{cls}'
-            if key in config_stats[model]:
-                recalls.append(config_stats[model][key]['mean'] * 100)
+            key = f"recall_{cls}"  # analysis.py uses recall_{cls} format
+            if key in config_stats[model_key]:
+                recalls.append(config_stats[model_key][key]['mean'] * 100)
             else:
                 recalls.append(0)
-        ax.bar(x + i * width, recalls, width, label=label,
-               color=COLORS[label], edgecolor='black', linewidth=0.5)
 
-    ax.set_xlabel('Fault Class')
+        ax.bar(x + i * width, recalls, width, label=model_name,
+               color=COLORS[model_name], edgecolor='black', linewidth=0.5)
+
     ax.set_ylabel('Recall (%)')
+    ax.set_xlabel('Fault Class')
     ax.set_title('Per-Class Performance (Fault-Size Split)')
     ax.set_xticks(x + width)
     ax.set_xticklabels(classes)
     ax.set_ylim(0, 105)
-    ax.legend(loc='upper right')
+    ax.legend()
 
     plt.tight_layout()
     _save_figure(figures_dir, "fig02_per_class_performance")
 
 
 def fig_split_comparison(stats: dict, figures_dir: str):
-    """Random vs fault-size split comparison."""
-    fig, ax = plt.subplots(figsize=(6, 4))
+    """Compare random vs fault-size split performance."""
+    fig, ax = plt.subplots(figsize=(6, 5))
 
-    splits = ['4class_random', '4class_fault_size']
-    split_labels = ['Random Split\n(Data Leakage)', 'Fault-Size Split\n(Generalization)']
+    splits = ['4class_random', '4class_fault_size_all_loads']
+    alt_splits = ['4class_random', '4class_fault_size']
+    labels = ['Random Split\n(Data Leakage)', 'Fault-Size Split\n(Generalization)']
+    colors_split = ['#e74c3c', '#2ecc71']
 
-    means, stds = [], []
-    for split in splits:
-        if split in stats and 'cnn' in stats[split]:
-            means.append(stats[split]['cnn']['accuracy']['mean'] * 100)
-            stds.append(stats[split]['cnn']['accuracy']['std'] * 100)
+    means = []
+    stds = []
+
+    for split, alt in zip(splits, alt_splits):
+        cfg = split if split in stats else alt
+        if cfg in stats and 'cnn' in stats[cfg]:
+            means.append(stats[cfg]['cnn']['accuracy']['mean'] * 100)
+            stds.append(stats[cfg]['cnn']['accuracy']['std'] * 100)
         else:
             means.append(0)
             stds.append(0)
 
-    x = np.arange(len(splits))
-    colors = ['#e74c3c', '#27ae60']
-
-    bars = ax.bar(x, means, yerr=stds, capsize=5, color=colors,
-                  edgecolor='black', linewidth=0.5)
+    x = np.arange(len(labels))
+    bars = ax.bar(x, means, yerr=stds, capsize=5, color=colors_split, edgecolor='black', linewidth=0.5)
 
     ax.set_ylabel('Accuracy (%)')
     ax.set_title('Impact of Data Split Strategy (CNN)')
     ax.set_xticks(x)
-    ax.set_xticklabels(split_labels)
+    ax.set_xticklabels(labels)
     ax.set_ylim(0, 110)
 
+    # Add value labels
     for bar, mean in zip(bars, means):
-        ax.annotate(f'{mean:.1f}%',
-                    xy=(bar.get_x() + bar.get_width() / 2, bar.get_height() + 2),
-                    ha='center', va='bottom', fontsize=11, fontweight='bold')
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 2,
+                f'{mean:.1f}%', ha='center', va='bottom', fontsize=11, fontweight='bold')
 
+    # Delta annotation
     if len(means) == 2 and means[0] > 0 and means[1] > 0:
         delta = means[0] - means[1]
-        mid_y = (means[0] + means[1]) / 2
-        ax.annotate(f'Δ = {delta:.1f}%', xy=(0.5, mid_y), ha='center', fontsize=10,
-                    bbox=dict(boxstyle='round', facecolor='yellow', alpha=0.5))
+        ax.annotate(f'Δ = {delta:.1f}%', xy=(0.5, (means[0] + means[1]) / 2),
+                    fontsize=10, ha='center', fontweight='bold',
+                    bbox=dict(boxstyle='round', facecolor='yellow', alpha=0.8))
 
     plt.tight_layout()
     _save_figure(figures_dir, "fig03_split_comparison")
 
 
 def fig_confusion_matrix(study_name: str, figures_dir: str):
-    """Confusion matrices for CNN on fault-size split."""
-    results_dir = Path(config.RESULTS_DIR) / study_name
-    exp_dirs = list(results_dir.glob("cnn_4class_fault_size_seed*"))
+    """Generate confusion matrix from best model."""
+    from .experiment import list_experiments, load_experiment
 
-    if not exp_dirs:
-        print("  No CNN fault_size results found")
+    # Find a CNN fault-size experiment
+    experiments = list_experiments(study_name)
+    target_exp = None
+
+    for exp_dir in experiments:
+        if 'cnn_4class_fault_size' in exp_dir and 'seed42' in exp_dir:
+            target_exp = exp_dir
+            break
+
+    if target_exp is None:
+        # Try alternative
+        for exp_dir in experiments:
+            if 'cnn_4class_fault' in exp_dir:
+                target_exp = exp_dir
+                break
+
+    if target_exp is None:
+        print(f"  WARNING: No CNN fault-size experiment found, skipping")
         return
 
-    result_file = exp_dirs[0] / "results.json"
-    if not result_file.exists():
-        print(f"  Results file not found")
+    exp_data = load_experiment(target_exp)
+    results = exp_data.get('results', {})
+    test_metrics = results.get('test_metrics', {})
+    cm = test_metrics.get('confusion_matrix')
+
+    if cm is None:
+        print(f"  WARNING: No confusion matrix in results, skipping")
         return
 
-    with open(result_file) as f:
-        results = json.load(f)
-
-    cm = np.array(results['test_metrics']['confusion_matrix'])
-    class_names = ['Normal', 'Ball', 'IR', 'OR']
-    cm_norm = cm.astype('float') / (cm.sum(axis=1, keepdims=True) + 1e-8)
+    cm = np.array(cm)
+    classes = ['Normal', 'Ball', 'IR', 'OR']
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=axes[0],
-                xticklabels=class_names, yticklabels=class_names)
+    # Raw counts
+    im1 = axes[0].imshow(cm, cmap='Blues')
+    axes[0].set_title('Confusion Matrix (Counts)')
+    axes[0].set_xticks(np.arange(len(classes)))
+    axes[0].set_yticks(np.arange(len(classes)))
+    axes[0].set_xticklabels(classes)
+    axes[0].set_yticklabels(classes)
     axes[0].set_xlabel('Predicted')
     axes[0].set_ylabel('True')
-    axes[0].set_title('Confusion Matrix (Counts)')
 
-    sns.heatmap(cm_norm, annot=True, fmt='.2f', cmap='Blues', ax=axes[1],
-                xticklabels=class_names, yticklabels=class_names)
+    for i in range(len(classes)):
+        for j in range(len(classes)):
+            axes[0].text(j, i, str(cm[i, j]), ha='center', va='center',
+                         color='white' if cm[i, j] > cm.max() / 2 else 'black')
+
+    plt.colorbar(im1, ax=axes[0])
+
+    # Normalized
+    cm_norm = cm.astype('float') / cm.sum(axis=1, keepdims=True)
+    im2 = axes[1].imshow(cm_norm, cmap='Blues', vmin=0, vmax=1)
+    axes[1].set_title('Confusion Matrix (Normalized)')
+    axes[1].set_xticks(np.arange(len(classes)))
+    axes[1].set_yticks(np.arange(len(classes)))
+    axes[1].set_xticklabels(classes)
+    axes[1].set_yticklabels(classes)
     axes[1].set_xlabel('Predicted')
     axes[1].set_ylabel('True')
-    axes[1].set_title('Confusion Matrix (Normalized)')
 
-    fig.suptitle('CNN on Fault-Size Split', fontsize=12, fontweight='bold')
+    for i in range(len(classes)):
+        for j in range(len(classes)):
+            axes[1].text(j, i, f'{cm_norm[i, j]:.2f}', ha='center', va='center',
+                         color='white' if cm_norm[i, j] > 0.5 else 'black')
+
+    plt.colorbar(im2, ax=axes[1])
+
+    plt.suptitle('CNN on Fault-Size Split', fontsize=12, fontweight='bold')
     plt.tight_layout()
     _save_figure(figures_dir, "fig04_confusion_matrix")
 
 
 def fig_training_curves(study_name: str, figures_dir: str):
-    """Training loss and accuracy curves."""
-    results_dir = Path(config.RESULTS_DIR) / study_name
-    exp_dirs = list(results_dir.glob("cnn_4class_fault_size*_seed42"))
+    """Training curves from a representative experiment."""
+    from .experiment import list_experiments, load_experiment
 
-    if not exp_dirs:
-        exp_dirs = list(results_dir.glob("cnn_*_seed42"))
+    experiments = list_experiments(study_name)
+    target_exp = None
 
-    if not exp_dirs:
-        print("  No experiment results found")
+    # Prefer random split (has validation data)
+    for exp_dir in experiments:
+        if 'cnn_4class_random' in exp_dir and 'seed42' in exp_dir:
+            target_exp = exp_dir
+            break
+
+    if target_exp is None:
+        for exp_dir in experiments:
+            if 'cnn_4class' in exp_dir:
+                target_exp = exp_dir
+                break
+
+    if target_exp is None:
+        print(f"  WARNING: No suitable experiment found, skipping")
         return
 
-    history_file = exp_dirs[0] / "history.json"
-    if not history_file.exists():
-        print(f"  History file not found")
+    exp_data = load_experiment(target_exp)
+    history = exp_data.get('history', {})
+
+    if not history or 'train_loss' not in history:
+        print(f"  WARNING: No training history found, skipping")
         return
 
-    with open(history_file) as f:
-        history = json.load(f)
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+    epochs = range(1, len(history['train_loss']) + 1)
 
-    plot_training_curves(history, save_path=os.path.join(figures_dir, "fig5_training_curves.png"))
-    print("  Saved: fig05_training_curves.png")
+    # Loss
+    axes[0].plot(epochs, history['train_loss'], label='Train', color=CLASS_COLORS[0], linewidth=2)
+    if history.get('val_loss') and any(v > 0 for v in history['val_loss']):
+        axes[0].plot(epochs, history['val_loss'], label='Validation', color=CLASS_COLORS[2], linewidth=2)
+    axes[0].set_xlabel('Epoch')
+    axes[0].set_ylabel('Loss')
+    axes[0].set_title('Training and Validation Loss')
+    axes[0].legend()
 
+    # Accuracy
+    axes[1].plot(epochs, history['train_acc'], label='Train', color=CLASS_COLORS[0], linewidth=2)
+    if history.get('val_acc') and any(v > 0 for v in history['val_acc']):
+        axes[1].plot(epochs, history['val_acc'], label='Validation', color=CLASS_COLORS[2], linewidth=2)
+    axes[1].set_xlabel('Epoch')
+    axes[1].set_ylabel('Accuracy')
+    axes[1].set_title('Training and Validation Accuracy')
+    axes[1].legend()
 
+    plt.tight_layout()
+    _save_figure(figures_dir, "fig05_training_curves")
+
+# ToDo
 def fig_roc_curves(study_name: str, figures_dir: str):
     """ROC curves for multilabel classification."""
-    results_dir = Path(config.RESULTS_DIR) / study_name
-    exp_dirs = list(results_dir.glob("cnn_multilabel_fault_size_seed*"))
+    from .experiment import list_experiments, load_experiment
 
-    if not exp_dirs:
-        print("  No multilabel results found")
+    experiments = list_experiments(study_name)
+
+    # Collect all multilabel fault-size results
+    roc_data = {'Ball': [], 'IR': [], 'OR': []}
+
+    for exp_dir in experiments:
+        if 'cnn_multilabel_fault_size' in exp_dir:
+            exp_data = load_experiment(exp_dir)
+            results = exp_data.get('results', {})
+            test_metrics = results.get('test_metrics', {})
+
+            for class_name in ['Ball', 'IR', 'OR']:
+                per_class = test_metrics.get('per_class_metrics', {}).get(class_name, {})
+                if 'fpr' in per_class and 'tpr' in per_class:
+                    roc_data[class_name].append({
+                        'fpr': per_class['fpr'],
+                        'tpr': per_class['tpr'],
+                        'auroc': per_class.get('auroc', 0)
+                    })
+
+    if not any(roc_data.values()):
+        print(f"  WARNING: No ROC data found, skipping")
         return
 
     fig, ax = plt.subplots(figsize=(6, 6))
 
-    aurocs = {'Ball': [], 'IR': [], 'OR': []}
-    for exp_dir in exp_dirs:
-        result_file = exp_dir / "results.json"
-        if result_file.exists():
-            with open(result_file) as f:
-                results = json.load(f)
-            for cls in ['Ball', 'IR', 'OR']:
-                if cls in results['test_metrics'].get('per_class_metrics', {}):
-                    aurocs[cls].append(results['test_metrics']['per_class_metrics'][cls]['auroc'])
-
     colors = {'Ball': '#f39c12', 'IR': '#e74c3c', 'OR': '#8e44ad'}
 
-    for cls, color in colors.items():
-        if aurocs[cls]:
-            mean_auroc = np.mean(aurocs[cls])
-            std_auroc = np.std(aurocs[cls])
-            fpr = np.linspace(0, 1, 100)
-            tpr = fpr ** (1 / (mean_auroc * 2)) if mean_auroc > 0.5 else fpr
-            ax.plot(fpr, tpr, color=color, linewidth=2,
-                    label=f'{cls} (AUROC={mean_auroc:.3f}+-{std_auroc:.3f})')
+    for class_name, data_list in roc_data.items():
+        if not data_list:
+            continue
+
+        # Use first seed's data, average AUROC across seeds
+        fpr = data_list[0]['fpr']
+        tpr = data_list[0]['tpr']
+        aurocs = [d['auroc'] for d in data_list]
+        mean_auroc = np.mean(aurocs)
+        std_auroc = np.std(aurocs)
+
+        ax.plot(fpr, tpr, color=colors[class_name], linewidth=2,
+                label=f'{class_name} (AUROC={mean_auroc:.3f}+-{std_auroc:.3f})')
 
     ax.plot([0, 1], [0, 1], 'k--', linewidth=1, label='Random')
     ax.set_xlabel('False Positive Rate')
     ax.set_ylabel('True Positive Rate')
     ax.set_title('ROC Curves (Multilabel Fault-Size Split)')
     ax.legend(loc='lower right')
-    ax.set_xlim(-0.02, 1.02)
-    ax.set_ylim(-0.02, 1.02)
+    ax.set_xlim([0, 1])
+    ax.set_ylim([0, 1])
     ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
@@ -374,40 +465,36 @@ def fig_roc_curves(study_name: str, figures_dir: str):
 
 
 def fig_tsne_visualization(figures_dir: str):
-    """t-SNE visualization of features."""
+    """t-SNE visualization of FFT features."""
     from sklearn.manifold import TSNE
     from .data import load_data
 
-    try:
-        data = load_data(mode="4class", split="fault_size_all_loads", seed=42, verbose=False)
-    except Exception as e:
-        print(f"  Could not load data: {e}")
-        return
+    # Load data
+    data = load_data(mode='4class', split='fault_size_all_loads', seed=42, verbose=False)
 
-    X_test = data['X_test']
+    X_test = data['X_test'].reshape(data['X_test'].shape[0], -1)
     y_test = data['y_test']
 
-    n_samples = min(1000, len(X_test))
-    np.random.seed(42)
-    idx = np.random.choice(len(X_test), n_samples, replace=False)
-    X_sub = X_test[idx].reshape(n_samples, -1)
-    y_sub = y_test[idx]
+    # t-SNE
+    tsne = TSNE(n_components=2, random_state=42, perplexity=30)
+    X_embedded = tsne.fit_transform(X_test)
 
-    print("  Running t-SNE (may take a minute)...")
-    tsne = TSNE(n_components=2, perplexity=30, random_state=42)
-    X_tsne = tsne.fit_transform(X_sub)
-
+    # Plot
     fig, ax = plt.subplots(figsize=(8, 6))
-    class_names = ['Normal', 'Ball', 'IR', 'OR']
+    classes = ['Normal', 'Ball', 'IR', 'OR']
 
-    for i, name in enumerate(class_names):
-        mask = y_sub == i
-        ax.scatter(X_tsne[mask, 0], X_tsne[mask, 1], c=CLASS_COLORS[i],
-                   label=name, alpha=0.6, s=20)
+    for i, (cls, color) in enumerate(zip(classes, CLASS_COLORS)):
+        mask = y_test == i
+        ax.scatter(X_embedded[mask, 0], X_embedded[mask, 1],
+                   c=color, label=cls, alpha=0.6, s=30)
 
     ax.set_xlabel('t-SNE 1')
     ax.set_ylabel('t-SNE 2')
-    ax.set_title('t-SNE Visualization of FFT Features (Test Set)')
+
+    # Depends on config.FEATURE_MODE - not the most trivial solution
+    feature_name = config.FEATURE_MODE.upper()
+    ax.set_title(f't-SNE Visualization of {feature_name} Features (Test Set)')
+
     ax.legend()
 
     plt.tight_layout()
@@ -415,7 +502,7 @@ def fig_tsne_visualization(figures_dir: str):
 
 
 def fig_signal_examples(figures_dir: str):
-    """Raw signal and FFT spectrum examples."""
+    """Example signals from each fault class."""
     sample_files = {
         'Normal': '1772_Normal.npz',
         'Ball': '1772_B_7_DE12.npz',
@@ -461,15 +548,17 @@ def fig_signal_examples(figures_dir: str):
 
 
 def fig_activation_test(figures_dir: str):
-    """Activation function comparison."""
-    # Results from activation experiment
-    results = {
-        'GELU': (67.38, 0.93),
-        'Leaky ReLU': (66.55, 1.92),
-        'ReLU': (66.40, 0.99),
-        'ELU': (64.57, 2.06),
-        'SELU': (64.52, 1.43),
-    }
+    """Activation function comparison - LOADS FROM FILE, NOT HARDCODED."""
+    # Try to load activation results from file
+    activation_results_path = os.path.join(config.RESULTS_DIR, 'activation_test_results.json')
+
+    if os.path.exists(activation_results_path):
+        with open(activation_results_path) as f:
+            results = json.load(f)
+        print(f"  Loaded activation results from {activation_results_path}")
+    else:
+        print(f"  SKIPPING fig09_activation_comparison")
+        return
 
     fig, ax = plt.subplots(figsize=(6, 4))
 
@@ -501,34 +590,45 @@ def fig_activation_test(figures_dir: str):
 
 def fig_summary_heatmap(stats: dict, figures_dir: str):
     """Summary heatmap of all results."""
-    configs = ['4class_random', '4class_fault_size', '4class_cross_load']
-    config_labels = ['Random', 'Fault-Size', 'Cross-Load']
-    models = ['cnn', 'lstm', 'cnnlstm']
-    model_labels = ['CNN', 'LSTM', 'CNN-LSTM']
+    models = ['CNN', 'LSTM', 'CNN-LSTM']
+    model_keys = ['cnn', 'lstm', 'cnnlstm']
+    splits = ['Random', 'Fault-Size', 'Cross-Load']
+    split_keys = ['4class_random', '4class_fault_size_all_loads', '4class_cross_load']
+    alt_keys = ['4class_random', '4class_fault_size', '4class_cross_load']
 
-    acc_matrix = np.zeros((len(models), len(configs)))
+    acc_matrix = np.zeros((len(models), len(splits)))
 
-    for i, model in enumerate(models):
-        for j, cfg in enumerate(configs):
+    for i, model in enumerate(model_keys):
+        for j, (split, alt) in enumerate(zip(split_keys, alt_keys)):
+            cfg = split if split in stats else alt
             if cfg in stats and model in stats[cfg] and 'accuracy' in stats[cfg][model]:
                 acc_matrix[i, j] = stats[cfg][model]['accuracy']['mean'] * 100
 
-    fig, ax = plt.subplots(figsize=(8, 5))
+    fig, ax = plt.subplots(figsize=(7, 4))
 
-    sns.heatmap(acc_matrix, annot=True, fmt='.1f', cmap='RdYlGn',
-                xticklabels=config_labels, yticklabels=model_labels,
-                vmin=50, vmax=100, ax=ax)
+    im = ax.imshow(acc_matrix, cmap='RdYlGn', aspect='auto', vmin=50, vmax=100)
 
+    ax.set_xticks(np.arange(len(splits)))
+    ax.set_yticks(np.arange(len(models)))
+    ax.set_xticklabels(splits)
+    ax.set_yticklabels(models)
     ax.set_xlabel('Split Strategy')
     ax.set_ylabel('Model')
     ax.set_title('Accuracy (%) Across All Configurations')
 
+    for i in range(len(models)):
+        for j in range(len(splits)):
+            val = acc_matrix[i, j]
+            color = 'white' if val < 70 else 'black'
+            ax.text(j, i, f'{val:.1f}', ha='center', va='center', color=color, fontsize=11)
+
+    plt.colorbar(im, ax=ax)
     plt.tight_layout()
     _save_figure(figures_dir, "fig10_summary_heatmap")
 
 
 # =============================================================================
-# Entry point
+# Main Generation
 # =============================================================================
 
 def generate_all_figures(study_name: str, stats: dict = None):
@@ -542,9 +642,6 @@ def generate_all_figures(study_name: str, stats: dict = None):
 
     figures_dir = os.path.join(config.FIGURES_DIR, study_name)
     os.makedirs(figures_dir, exist_ok=True)
-
-    # The step numbers are hardcoded by design.
-    # The figure pipeline is static, so a dynamic counter would add complexity without improving clarity.
 
     print_header(f"GENERATING FIGURES: {study_name}")
     print(f"Output: {figures_dir}\n")

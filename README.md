@@ -220,18 +220,18 @@ The columns after Macro F1 are per class recalls. Notice how:
 
 Running `python -m src.main figures comparison` creates these in `figures/comparison/`:
 
-| Figure | Description |
-|--------|-------------|
-| `fig1_model_comparison.png` | Bar chart comparing model accuracies |
-| `fig2_per_class_performance.png` | Per class recall |
-| `fig3_split_comparison.png` | Random vs fault size split |
-| `fig4_confusion_matrix.png` | Confusion matrices (counts + normalized) |
-| `fig5_training_curves.png` | Loss and accuracy over epochs |
-| `fig6_roc_curves.png` | ROC curves for multilabel classification |
-| `fig7_tsne_features.png` | t SNE visualization of learned features |
-| `fig8_signal_examples.png` | Raw signals and FFT spectra for each class |
-| `fig9_activation_ablation.png` | Activation function comparison |
-| `fig10_summary_heatmap.png` | Heatmap of all models across all splits |
+| Figure                            | Description |
+|-----------------------------------|-------------|
+| `fig01_model_comparison.png`      | Bar chart comparing model accuracies |
+| `fig02_per_class_performance.png` | Per class recall |
+| `fig03_split_comparison.png`      | Random vs fault size split |
+| `fig04_confusion_matrix.png`      | Confusion matrices (counts + normalized) |
+| `fig05_training_curves.png`       | Loss and accuracy over epochs |
+| `fig06_roc_curves.png`            | ROC curves for multilabel classification |
+| `fig07_tsne_features.png`         | t SNE visualization of learned features |
+| `fig08_signal_examples.png`       | Raw signals and FFT spectra for each class |
+| `fig09_activation_test.png`       | Activation function comparison |
+| `fig10_summary_heatmap.png`       | Heatmap of all models across all splits |
 
 All figures are saved as both PNG and PDF for convenience.
 

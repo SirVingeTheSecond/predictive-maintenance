@@ -1,26 +1,8 @@
-"""
-Data Augmentation for Bearing Fault Diagnosis
-
-Based on techniques from:
-- TF-MDA (Sensors 2023): Gaussian noise injection at various SNR levels
-- ECTN (Electronics 2023): Noise robustness testing from -4dB to 10dB
-- WDCNN empirical studies: jittering, scaling, stretching, cropping
-- CNN-LSTM (Mathematical Biosciences 2023): Resampling augmentation
-
-Key insight for domain shift:
-Augmentation during TRAINING helps the model learn more robust features
-that may generalize better to unseen fault severities (014).
-"""
-
 import numpy as np
 import torch
 from torch.utils.data import Dataset
-from typing import Optional, List, Callable
+from typing import Optional
 
-
-# =============================================================================
-# Core Augmentation Functions (NumPy-based, applied before batching)
-# =============================================================================
 
 def add_gaussian_noise(signal: np.ndarray, snr_db: float) -> np.ndarray:
     """
@@ -214,10 +196,10 @@ def permutation(signal: np.ndarray, n_segments: int = 4) -> np.ndarray:
 
 
 # =============================================================================
-# Augmentation Policies (Combinations of transforms)
+# Augmentations (Combinations of transforms)
 # =============================================================================
 
-class AugmentationPolicy:
+class Augmentations:
     """
     Defines which augmentations to apply and with what probability.
 
@@ -230,7 +212,7 @@ class AugmentationPolicy:
     def __init__(
             self,
             noise_prob: float = 0.5,
-            noise_snr_range: tuple = (2, 10),  # Conservative: 2-10 dB
+            noise_snr_range: tuple = (2, 10),  # 2-10 dB
             scale_prob: float = 0.3,
             scale_range: tuple = (0.8, 1.2),
             shift_prob: float = 0.3,
@@ -258,7 +240,7 @@ class AugmentationPolicy:
     def __call__(self, signal: np.ndarray) -> np.ndarray:
         """Apply augmentations with configured probabilities."""
 
-        # Noise injection (most important for robustness)
+        # Noise injection (most likely has the largest impact?)
         if np.random.random() < self.noise_prob:
             snr = np.random.uniform(self.noise_snr_range[0], self.noise_snr_range[1])
             signal = add_gaussian_noise(signal, snr)
@@ -287,29 +269,29 @@ class AugmentationPolicy:
 
 
 # =============================================================================
-# Predefined Policies (from paper analysis)
+# Predefined augmentations (these are pretty much inspired by papers)
 # =============================================================================
 
-def get_augmentation_policy(name: str) -> AugmentationPolicy:
+def get_augmentations(name: str) -> Augmentations:
     """
-    Get a predefined augmentation policy.
+    Get predefined augmentations.
 
-    Policies based on paper findings:
+    Augmentations based on findings from papers:
     - 'none': No augmentation (baseline)
     - 'light': Conservative augmentation
-    - 'moderate': Balanced augmentation (recommended)
+    - 'moderate': Balanced augmentation
     - 'heavy': Aggressive augmentation
-    - 'noise_only': Only Gaussian noise (for ablation)
-    - 'warp_only': Only time warping (for ablation)
+    - 'noise_only': Only Gaussian noise (for test)
+    - 'warp_only': Only time warping (for test)
     """
 
-    policies = {
-        'none': AugmentationPolicy(
+    augmentations = {
+        'none': Augmentations(
             noise_prob=0, scale_prob=0, shift_prob=0,
             warp_prob=0, jitter_prob=0, crop_prob=0
         ),
 
-        'light': AugmentationPolicy(
+        'light': Augmentations(
             noise_prob=0.3, noise_snr_range=(6, 12),
             scale_prob=0.2, scale_range=(0.9, 1.1),
             shift_prob=0.2, shift_ratio=0.05,
@@ -318,7 +300,7 @@ def get_augmentation_policy(name: str) -> AugmentationPolicy:
             crop_prob=0.1, crop_ratio=0.95,
         ),
 
-        'moderate': AugmentationPolicy(
+        'moderate': Augmentations(
             noise_prob=0.5, noise_snr_range=(2, 10),
             scale_prob=0.3, scale_range=(0.8, 1.2),
             shift_prob=0.3, shift_ratio=0.1,
@@ -327,7 +309,7 @@ def get_augmentation_policy(name: str) -> AugmentationPolicy:
             crop_prob=0.2, crop_ratio=0.9,
         ),
 
-        'heavy': AugmentationPolicy(
+        'heavy': Augmentations(
             noise_prob=0.7, noise_snr_range=(-2, 8),  # Can go to negative SNR
             scale_prob=0.5, scale_range=(0.7, 1.3),
             shift_prob=0.5, shift_ratio=0.15,
@@ -336,34 +318,34 @@ def get_augmentation_policy(name: str) -> AugmentationPolicy:
             crop_prob=0.3, crop_ratio=0.85,
         ),
 
-        # Ablation policies
-        'noise_only': AugmentationPolicy(
+        # Test augmentations
+        'noise_only': Augmentations(
             noise_prob=0.5, noise_snr_range=(2, 10),
             scale_prob=0, shift_prob=0, warp_prob=0,
             jitter_prob=0, crop_prob=0
         ),
 
-        'warp_only': AugmentationPolicy(
+        'warp_only': Augmentations(
             noise_prob=0, scale_prob=0, shift_prob=0,
             warp_prob=0.5, warp_sigma=0.2,
             jitter_prob=0, crop_prob=0
         ),
 
-        'scale_only': AugmentationPolicy(
+        'scale_only': Augmentations(
             noise_prob=0, warp_prob=0, shift_prob=0,
             scale_prob=0.5, scale_range=(0.7, 1.3),
             jitter_prob=0, crop_prob=0
         ),
     }
 
-    if name not in policies:
-        raise ValueError(f"Unknown policy: {name}. Available: {list(policies.keys())}")
+    if name not in augmentations:
+        raise ValueError(f"Unknown augmentation: {name}. Available: {list(augmentations.keys())}")
 
-    return policies[name]
+    return augmentations[name]
 
 
 # =============================================================================
-# Augmented Dataset Wrapper
+# Augmented wrapper for Dataset
 # =============================================================================
 
 class AugmentedSignalDataset(Dataset):
@@ -372,37 +354,37 @@ class AugmentedSignalDataset(Dataset):
 
     Usage:
         from .data import SignalDataset
-        from .augmentation import AugmentedSignalDataset, get_augmentation_policy
+        from .augmentation import AugmentedSignalDataset, get_augmentations
 
         base_dataset = SignalDataset(X_train, y_train, mode)
-        policy = get_augmentation_policy('moderate')
-        train_dataset = AugmentedSignalDataset(base_dataset, policy)
+        augmentations = get_augmentations('moderate')
+        train_dataset = AugmentedSignalDataset(base_dataset, augmentation)
     """
 
     def __init__(
             self,
             base_dataset: Dataset,
-            augmentation_policy: Optional[AugmentationPolicy] = None,
+            augmentations: Optional[Augmentations] = None,
             augment_prob: float = 0.8,  # Probability of augmenting any sample
     ):
         """
         Args:
             base_dataset: Original dataset
-            augmentation_policy: Policy defining which augmentations to apply
+            augmentations: Defining which augmentations to apply
             augment_prob: Overall probability of applying any augmentation
         """
         self.base_dataset = base_dataset
-        self.augmentation_policy = augmentation_policy
+        self.augmentations = augmentations
         self.augment_prob = augment_prob
 
     def __len__(self):
-        return len(self.base_dataset)
+        return len(self.base_dataset)  # Expected type 'Sized', got 'Dataset' instead
 
     def __getitem__(self, idx):
         x, y = self.base_dataset[idx]
 
         # Apply augmentation with probability
-        if self.augmentation_policy is not None and np.random.random() < self.augment_prob:
+        if self.augmentations is not None and np.random.random() < self.augment_prob:
             # Convert to numpy for augmentation
             if isinstance(x, torch.Tensor):
                 x_np = x.numpy()
@@ -410,7 +392,7 @@ class AugmentedSignalDataset(Dataset):
                 x_np = x
 
             # Apply augmentation
-            x_np = self.augmentation_policy(x_np)
+            x_np = self.augmentations(x_np)
 
             # Convert back to tensor
             x = torch.from_numpy(x_np.copy()).float()
@@ -419,16 +401,16 @@ class AugmentedSignalDataset(Dataset):
 
 
 # =============================================================================
-# Utility: Visualize Augmentations
+# Visualization of Augmentations
 # =============================================================================
 
-def visualize_augmentations(signal: np.ndarray, policy_name: str = 'moderate', n_samples: int = 5):
+def visualize_augmentations(signal: np.ndarray, augmentation_name: str = 'moderate', n_samples: int = 5):
     """
     Visualize effect of augmentations on a sample signal.
 
     Args:
         signal: Original signal (1D or 2D)
-        policy_name: Name of augmentation policy
+        augmentation_name: Name of augmentation (duh)
         n_samples: Number of augmented versions to show
 
     Returns:
@@ -436,7 +418,7 @@ def visualize_augmentations(signal: np.ndarray, policy_name: str = 'moderate', n
     """
     import matplotlib.pyplot as plt
 
-    policy = get_augmentation_policy(policy_name)
+    augmentation = get_augmentations(augmentation_name)
 
     fig, axes = plt.subplots(n_samples + 1, 1, figsize=(12, 2 * (n_samples + 1)))
 
@@ -452,7 +434,7 @@ def visualize_augmentations(signal: np.ndarray, policy_name: str = 'moderate', n
 
     # Augmented versions
     for i in range(n_samples):
-        aug_signal = policy(signal.copy())
+        aug_signal = augmentation(signal.copy())
         if aug_signal.ndim == 2:
             plot_aug = aug_signal[0]
         else:
@@ -498,9 +480,9 @@ if __name__ == "__main__":
     cropped = window_crop(signal, 0.9)
     print(f"Cropped: shape={cropped.shape}")
 
-    # Test policy
-    policy = get_augmentation_policy('moderate')
-    augmented = policy(signal)
-    print(f"Policy 'moderate': shape={augmented.shape}, std={augmented.std():.4f}")
+    # Test augmentations
+    augmentations = get_augmentations('moderate')
+    augmented = augmentations(signal)
+    print(f"Augmentations 'moderate': shape={augmented.shape}, std={augmented.std():.4f}")
 
     print("\nAll augmentation tests passed!")

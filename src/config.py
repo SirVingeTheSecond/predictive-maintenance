@@ -5,26 +5,29 @@ import os
 # =============================================================================
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.dirname(_THIS_DIR)  # Go up from src/ to project root
+PROJECT_ROOT = os.path.dirname(_THIS_DIR)
 
 DATA_DIR = os.path.join(PROJECT_ROOT, "data", "raw")
 RESULTS_DIR = os.path.join(PROJECT_ROOT, "results")
 FIGURES_DIR = os.path.join(PROJECT_ROOT, "figures")
 
 # =============================================================================
-# Device configuration
+# Experiment seeds
 # =============================================================================
 
-# Determined at runtime to avoid requiring torch at import
-DEVICE = None  # Set by get_device() in utils.py
+EXPERIMENT_SEEDS = [42, 123, 456]
 
-# Seeds for multi-run experiments
-# NOTE: Other papers recommend 5-30 seeds for reliability
-# - Benchmark paper: 30 seeds
-# - ECMCTP: 10 experiments averaged
-# - CNN-LSTM: 5-fold CV
-SEEDS = [42, 123, 456, 789, 1024, 2048, 3072, 4096, 5120, 6144]
+STUDY_SEEDS = [42, 123, 456, 789, 1024]
+
+FULL_SEEDS = [42, 123, 456, 789, 1024, 2048, 3072, 4096, 5120, 6144]
+
 DEFAULT_SEED = 42
+
+# =============================================================================
+# Activation functions for tests
+# =============================================================================
+
+ACTIVATIONS = ["relu", "leaky_relu", "gelu", "elu", "selu"]
 
 # =============================================================================
 # Signal processing
@@ -32,7 +35,7 @@ DEFAULT_SEED = 42
 
 WINDOW_SIZE = 2048
 STRIDE = 512  # 75% overlap
-SAMPLING_RATE = 12000  # Hz
+SAMPLING_RATE = 12000  # Hz (just for documentation)
 
 # Feature extraction: "time", "fft", "both"
 FEATURE_MODE = "fft"
@@ -42,10 +45,10 @@ FEATURE_MODE = "fft"
 # =============================================================================
 
 MOTOR_LOADS = ["1772", "1750", "1730"]
-FAULT_SIZES = ["007", "014", "021"]
-TEST_FAULT_SIZE = "014"  # For generalization test
+FAULT_SIZES = ["007", "014", "021"]  # For documentation
+TEST_FAULT_SIZE = "014"  # Held out for generalization test
 
-# File mapping: (filename_template, class_name, fault_size, 4class_idx, 10class_idx, multilabel)
+
 def get_file_mapping(load: str) -> list:
     """Return file mapping for a motor load."""
     return [
@@ -61,18 +64,15 @@ def get_file_mapping(load: str) -> list:
         (f"{load}_OR@6_21_DE12.npz", "OR_021", "021", 3, 9, [0, 0, 1]),
     ]
 
+
 # =============================================================================
 # Classification modes
 # =============================================================================
 
 CLASS_NAMES = {
     "4class": ["Normal", "Ball", "IR", "OR"],
-    "10class": [
-        "Normal",
-        "Ball_007", "Ball_014", "Ball_021",
-        "IR_007", "IR_014", "IR_021",
-        "OR_007", "OR_014", "OR_021",
-    ],
+    "10class": ["Normal", "Ball_007", "Ball_014", "Ball_021",
+                "IR_007", "IR_014", "IR_021", "OR_007", "OR_014", "OR_021"],
     "multilabel": ["Ball", "IR", "OR"],
 }
 
@@ -90,20 +90,17 @@ BATCH_SIZE = 64
 EPOCHS = 100
 LEARNING_RATE = 1e-3
 WEIGHT_DECAY = 1e-4
-DROPOUT = 0.3
+DROPOUT = 0.4
 
+# Early stopping (only used when validation set exists)
 EARLY_STOPPING_PATIENCE = 15
-EARLY_STOPPING_MIN_DELTA = 0.001
+EARLY_STOPPING_MIN_DELTA = 1e-4
 
-# Studies can be seen declarative specifications of experiments to run.
-# Each study defines what combinations to test.
-#
-# NOTE (from other papers):
-# - For fault_size splits: validation set is empty, no early stopping
-# - Report mean +- std across seeds (the idea is to test the reliability)
+# =============================================================================
+# Studies
+# =============================================================================
 
 STUDIES = {
-    # Main comparison study for the paper
     "comparison": {
         "description": "Full comparison of models across configurations (5 seeds)",
         "models": ["cnn", "lstm", "cnnlstm"],
@@ -115,13 +112,12 @@ STUDIES = {
             {"mode": "multilabel", "split": "random", "name": "multilabel_random"},
             {"mode": "multilabel", "split": "fault_size_all_loads", "name": "multilabel_fault_size"},
         ],
-        "seeds": [42, 123, 456, 789, 1024],
-        "epochs": 100,
+        "seeds": STUDY_SEEDS,
+        "epochs": EPOCHS,
     },
 
-    # A study with 10 seeds
     "comparison_full": {
-        "description": "Full comparison with 10 seeds for statistical reliability",
+        "description": "Full comparison with 10 seeds (more reliable)",
         "models": ["cnn", "lstm", "cnnlstm"],
         "configurations": [
             {"mode": "4class", "split": "random", "name": "4class_random"},
@@ -131,22 +127,20 @@ STUDIES = {
             {"mode": "multilabel", "split": "random", "name": "multilabel_random"},
             {"mode": "multilabel", "split": "fault_size_all_loads", "name": "multilabel_fault_size"},
         ],
-        "seeds": [42, 123, 456, 789, 1024, 2048, 3072, 4096, 5120, 6144],
-        "epochs": 100,
+        "seeds": FULL_SEEDS,
+        "epochs": EPOCHS,
     },
 
-    # Quick test to verify setup
     "quick_test": {
         "description": "Quick validation run",
         "models": ["cnn"],
         "configurations": [
             {"mode": "4class", "split": "fault_size_all_loads", "name": "4class_fault_size"},
         ],
-        "seeds": [42],
+        "seeds": [DEFAULT_SEED],
         "epochs": 10,
     },
 
-    # Generalization study (fault-size and cross-load splits)
     "generalization": {
         "description": "Focus on generalization performance (5 seeds)",
         "models": ["cnn", "lstm", "cnnlstm"],
@@ -155,27 +149,26 @@ STUDIES = {
             {"mode": "4class", "split": "cross_load", "name": "4class_cross_load"},
             {"mode": "multilabel", "split": "fault_size_all_loads", "name": "multilabel_fault_size"},
         ],
-        "seeds": [42, 123, 456, 789, 1024],
-        "epochs": 100,
+        "seeds": STUDY_SEEDS,
+        "epochs": EPOCHS,
     },
 
-    # Fault-size study with K-fold CV
     "fault_size_kfold": {
-        "description": "Fault-size generalization with K-fold CV for epoch selection (arXiv 2407.14625)",
+        "description": "Fault-size generalization with K-fold CV for selecting epoch",
         "models": ["cnn", "lstm", "cnnlstm"],
         "configurations": [
             {"mode": "4class", "split": "fault_size_all_loads", "name": "4class_fault_size"},
             {"mode": "multilabel", "split": "fault_size_all_loads", "name": "multilabel_fault_size"},
         ],
-        "seeds": [42, 123, 456, 789, 1024],
-        "epochs": 100,  # Max epochs for k-fold CV
+        "seeds": STUDY_SEEDS,
+        "epochs": EPOCHS,
         "use_kfold_cv": True,
         "n_folds": 3,
     },
 }
 
 # =============================================================================
-# Hyperparameter search
+# Hyperparameter sweeps
 # =============================================================================
 
 SWEEPS = {
@@ -183,16 +176,31 @@ SWEEPS = {
         "description": "Grid search for optimal hyperparameters",
         "base_config": {
             "mode": "4class",
-            "split": "fault_size_all_loads",
+            # =====================================================================
+            # Approach A: "fault_size_all_loads"
+            #   - Uses K-fold CV on training data (no validation set)
+            #   - Recommended by Rosa et al. and the Benchmark paper
+            #   - Slower due to overhead
+            #   - Can be considered better for this specific problem
+            #
+            # Approach B: "random"
+            #   - Uses proper train/val/test split
+            #   - Standard practice in ML
+            #   - Faster (has validation set)
+            #   - Assumes hyperparameters transfer to fault_size split
+            # =====================================================================
+            "split": "fault_size_all_loads",  # Current: Approach A
         },
         "param_grid": {
             "model": ["cnn", "lstm", "cnnlstm"],
-            "lr": [1e-4, 5e-4, 1e-3],
-            "dropout": [0.2, 0.3, 0.5],
-            "weight_decay": [0, 1e-4, 1e-3],
+            "lr": [1e-4, 3e-4, 5e-4, 1e-3],
+            "dropout": [0.1, 0.2, 0.3, 0.4],
+            "weight_decay": [0, 1e-5, 1e-4, 5e-4],
         },
         "screening_epochs": 20,
-        "screening_threshold": 0.45,
-        "full_epochs": 100,
+        "screening_threshold": 0.50,
+        "full_epochs": EPOCHS,
+        "seeds": EXPERIMENT_SEEDS,
+        "n_folds": 3,  # For K-fold CV when no validation set exists
     },
 }
